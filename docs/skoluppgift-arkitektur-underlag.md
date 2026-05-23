@@ -24,6 +24,8 @@ Fält:
 - `display_name` (text)
 - `created_at` (timestamptz)
 - `updated_at` (timestamptz)
+- `nausea_score` (int, default 0)
+- `hunger_capacity` (int, dynamisk utifrån aktiva uppgifter)
 
 Notering:
 - Agent kan även representeras externt, men `actor_type` + `actor_ref` loggas alltid i events.
@@ -50,6 +52,8 @@ Fält:
 - `confirmed_at` (timestamptz, null)
 - `created_at` (timestamptz)
 - `updated_at` (timestamptz)
+- `nausea_score` (int, default 0)
+- `hunger_capacity` (int, dynamisk utifrån aktiva uppgifter)
 
 Constraints:
 - unique (`source`, `source_external_id`)
@@ -122,6 +126,8 @@ Fält:
 - `hunger_score` (int, default 0)
 - `streak_days` (int, default 0)
 - `updated_at` (timestamptz)
+- `nausea_score` (int, default 0)
+- `hunger_capacity` (int, dynamisk utifrån aktiva uppgifter)
 
 ## 7) reward_events
 Syfte: separata poäng-/avatarhändelser (för transparens och finjustering).
@@ -321,3 +327,42 @@ Response `200`:
 - Rolltest för statusövergångar.
 - Eventloggtest: varje ändring ska skapa `task_events`-rad.
 - Rewardtest: rätt effekt vid confirm/reject.
+
+
+## Tillägg 2026-05-22 (gamification/UX-state)
+
+### Låsta poängregler
+- `tasks.difficulty=easy` + `confirmed_done` => +3 stjärnor
+- `tasks.difficulty=medium` + `confirmed_done` => +6 stjärnor
+- `tasks.difficulty=hard` + `confirmed_done` => +10 stjärnor
+- `difficulty=unknown` behandlas som `medium` i v1
+
+### Hungerregler v1 (playtest-bas)
+- Ny uppgift från agent/system: hunger +3
+- Meningsfull progression: hunger -1 per steg
+- Max 3 hunger-sänkningar per uppgift/attempt-cykel
+- Idempotens krävs så toggle-spam inte ger extra effekt
+
+### Nausea-regler v1
+- `thinks_done -> rejected` ger `nausea_score +1`
+- Nausea ska kunna försvinna automatiskt efter 24h
+- Nausea ska nollställas vid level-up
+
+### Ny tabell: `task_feedback_animations`
+Syfte: säkra one-shot animation i UI (färg + emoji-flyg) exakt en gång per relevant reject-event.
+
+Fält:
+- `id` (uuid, pk)
+- `task_id` (uuid, fk -> tasks.id)
+- `child_user_id` (uuid, fk -> users.id)
+- `event_id` (uuid, fk -> task_events.id)
+- `animation_type` (enum: `reject_nausea`)
+- `animation_key` (text, unique)
+- `delivered_at` (timestamptz, null)
+- `seen_at` (timestamptz, null)
+- `created_at` (timestamptz)
+
+Regel:
+- Skapas vid reject-event.
+- API exponerar opelade animationer för barnet.
+- När UI har spelat animationen kvitteras den (`seen_at`) och ska inte spelas igen.

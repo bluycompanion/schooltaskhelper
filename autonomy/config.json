@@ -1,0 +1,12 @@
+{
+  "timezone": "Europe/Stockholm",
+  "working_hours": {
+    "start_hour": 16,
+    "end_hour_exclusive": 19
+  },
+  "max_runtime_seconds": 270,
+  "max_audit_attempts_per_step": 3,
+  "planner_command_template": "bash scripts/autonomy_role_step.sh planner {step_id}",
+  "executor_command_template": "bash scripts/autonomy_role_step.sh executor {step_id}",
+  "selfcheck_command_template": "bash scripts/autonomy_role_step.sh selfcheck {step_id}"
+}

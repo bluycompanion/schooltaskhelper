@@ -72,13 +72,16 @@ Förälder:
 
 ## 10) Gamification-krav
 Positivt:
-- Belöning när uppgift blir bekräftad klar
+- Belöning när uppgift blir bekräftad klar (stjärnor efter svårighetsgrad: enkel=3, medel=6, svår=10)
 - Extra positivt när “tror klar” var korrekt
 - Liten “mat”-signal/animation från uppgift till hungerbar vid positiva steg
 
 Mild negativ feedback:
 - Om “tror klar” inte stämmer: mild signal
 - Exempel: avatar mår lite illa + diskret negativ visuell indikator
+- Negativ animation (emoji från felaktig uppgift till hungerbar + färgskifte i bar) ska spelas exakt en gång per reject-händelse
+- UI måste läsa/kvittera opelade animationsevents från API så replay inte sker vid reload
+- Illamående ska kunna klinga av efter 24h eller nollställas vid level-up
 
 ## 11) Animation & känsla
 - Animationer ska öka tydlighet och motivation
@@ -101,3 +104,10 @@ Mild negativ feedback:
 - Hur mycket detalj av “historik” som ska visas i expanded-läge
 - Exakt visualisering av hungerbarens nivåer/steg
 - Exakt ordval för mikrocopy per ålderssegment
+
+
+## 15) Gameplay-parametrar att playtesta (låsta för första implementation)
+- Hunger +3 vid ny uppgift
+- Hunger -1 per meningsfull progression, max 3 sänkningar per uppgift/cykel
+- Nausea +1 vid reject
+- Nausea decay efter 24h eller vid level-up

@@ -1,0 +1,34 @@
+{
+  "project": "schooltaskhelper",
+  "steps": [
+    {
+      "id": "sql-01",
+      "title": "Create real DB migration files from DB_SCHEMA_V1_PREP.sql",
+      "status": "done",
+      "verify_commands": [
+        "test -f db/migrations/001_init_up.sql",
+        "test -f db/migrations/001_init_down.sql",
+        "grep -q \"CREATE TABLE IF NOT EXISTS child_progress_state\" db/migrations/001_init_up.sql"
+      ]
+    },
+    {
+      "id": "api-01",
+      "title": "Implement API integration endpoints for task progression/progress/animation ack",
+      "status": "done",
+      "verify_commands": [
+        "grep -q \"app.post('/agent/tasks'\" src/app.js",
+        "grep -q \"app.patch('/tasks/:id/planning'\" src/app.js",
+        "grep -q \"app.get('/children/:childUserId/progress'\" src/app.js"
+      ]
+    },
+    {
+      "id": "test-01",
+      "title": "Add and run integration tests for hunger/xp/nausea/one-shot animation",
+      "status": "done",
+      "verify_commands": [
+        "test -f tests/integration.test.js",
+        "npm test"
+      ]
+    }
+  ]
+}

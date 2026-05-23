@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Runtime data
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Autonomy runtime artifacts
+autonomy/logs/
+autonomy/state/
+autonomy/outbox/
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
+
+# Test/build output
+coverage/
+dist/
+build/

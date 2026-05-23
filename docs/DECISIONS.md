@@ -13,3 +13,13 @@
 - Connectivity: online-only
 - Theme: single mode in v1
 - Feedback: wins should outweigh setbacks (~10x)
+
+
+## 2026-05-22
+- Hungerregel (v1/playtest): +3 vid ny uppgift, -1 per meningsfull progression, max 3 sänkningar per uppgift/attempt-cykel.
+- XP/stjärnor vid `confirmed_done` låses till svårighetsgrad: easy=3, medium=6, hard=10.
+- Nausea +1 vid `thinks_done -> rejected`.
+- Nausea ska kunna försvinna efter 24h eller nollställas vid level-up.
+- Reject ska trigga one-shot visuell feedback (hungerbar-färg + emoji från uppgift till hungerbar), med persistent state så animationen spelas exakt en gång per händelse.
+- Både parent och agent får bekräfta `confirmed_done` i v1.
+- Hungerbarens kapacitet ska vara variabel och bero på antal uppgifter.
