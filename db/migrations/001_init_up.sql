@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS task_feedback_animations (
   event_id TEXT NOT NULL,
   animation_type TEXT NOT NULL CHECK(animation_type IN ('reject_nausea')),
   animation_key TEXT NOT NULL UNIQUE,
+  delivered_at TEXT,
   seen_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

@@ -316,7 +316,7 @@ Response `200`:
 - Starta lokalt med SQLite för snabb labb/test.
 - Använd seed/testscript för att populera child/parent/agent/tasks/events i dev.
 - Markera tydligt som tillfälligt (`ENABLE_DEV_SEED=true`) och ta bort innan produktionssättning.
-- Målbild på sikt: Postgres-kompatibel modell + migrationer.
+- Målbild för MVP: SQLite-modell och migrationer hålls som källa till sanning.
 
 ---
 

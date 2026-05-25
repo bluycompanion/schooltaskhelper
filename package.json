@@ -8,6 +8,10 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "dev:web": "vite --host 127.0.0.1",
+    "build:web": "vite build",
+    "typecheck:web": "tsc -b tsconfig.json",
+    "test:web": "tsc -p apps/web/tsconfig.node-test.json && node --test \"$PWD/node_modules/.tmp/web-tests/api/apiClient.test.js\"",
     "test": "node --test tests/integration.test.js"
   },
   "repository": {
@@ -24,9 +28,17 @@
   "homepage": "https://github.com/bluycompanion/schooltaskhelper#readme",
   "dependencies": {
     "better-sqlite3": "^12.10.0",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
-    "supertest": "^7.2.2"
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "supertest": "^7.2.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14"
   }
 }

@@ -148,6 +148,7 @@ function createApp(db) {
 
   app.post('/tasks/:id/reject', (req, res) => {
     const role = req.headers['x-role'];
+    const reason = req.body && typeof req.body.reason === 'string' ? req.body.reason : null;
     if (!(role === 'parent' || role === 'agent')) return res.status(403).json({ error: 'forbidden' });
     const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'not found' });
@@ -156,8 +157,8 @@ function createApp(db) {
 
     const tx = db.transaction(() => {
       const eventId = id();
-      db.prepare('INSERT INTO task_events (id, task_id, event_type, actor_type, actor_ref, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(eventId, task.id, 'confirmation_rejected', role, role, nowIso());
+      db.prepare('INSERT INTO task_events (id, task_id, event_type, actor_type, actor_ref, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(eventId, task.id, 'confirmation_rejected', role, role, nowIso(), JSON.stringify({ reason }));
       db.prepare('UPDATE tasks SET status=?, current_attempt_no=current_attempt_no+1, updated_at=? WHERE id=?').run('started', nowIso(), task.id);
       db.prepare('UPDATE child_progress_state SET nausea_score=nausea_score+1, nausea_updated_at=?, updated_at=? WHERE child_user_id=?')
         .run(nowIso(), nowIso(), task.child_user_id);
@@ -175,6 +176,15 @@ function createApp(db) {
     if (!task) return res.status(404).json({ error: 'not found' });
     const rows = db.prepare(`SELECT * FROM task_comments
                              WHERE task_id=? AND deleted_at IS NULL
+                             ORDER BY created_at ASC`).all(req.params.id);
+    res.json(rows);
+  });
+
+  app.get('/tasks/:id/events', (req, res) => {
+    const task = db.prepare('SELECT id FROM tasks WHERE id=?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'not found' });
+    const rows = db.prepare(`SELECT * FROM task_events
+                             WHERE task_id=?
                              ORDER BY created_at ASC`).all(req.params.id);
     res.json(rows);
   });
@@ -204,14 +214,18 @@ function createApp(db) {
   });
 
   app.get('/children/:childUserId/animations/pending', (req, res) => {
+    const deliveredAt = nowIso();
+    db.prepare('UPDATE task_feedback_animations SET delivered_at=? WHERE child_user_id=? AND seen_at IS NULL AND delivered_at IS NULL')
+      .run(deliveredAt, req.params.childUserId);
     const rows = db.prepare('SELECT * FROM task_feedback_animations WHERE child_user_id=? AND seen_at IS NULL ORDER BY created_at ASC').all(req.params.childUserId);
     res.json(rows);
   });
 
   app.post('/children/:childUserId/animations/:animationId/ack', (req, res) => {
+    const seenAt = nowIso();
     const r = db.prepare('UPDATE task_feedback_animations SET seen_at=? WHERE id=? AND child_user_id=? AND seen_at IS NULL')
-      .run(nowIso(), req.params.animationId, req.params.childUserId);
-    res.json({ acknowledged: r.changes === 1 });
+      .run(seenAt, req.params.animationId, req.params.childUserId);
+    res.json({ acknowledged: r.changes === 1, seen_at: r.changes === 1 ? seenAt : null });
   });
 
   return app;

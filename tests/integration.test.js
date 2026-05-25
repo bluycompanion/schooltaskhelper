@@ -5,6 +5,7 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 const { createApp } = require('../src/app');
+const { runMigrations } = require('../src/db');
 
 function setup() {
   const db = new Database(':memory:');
@@ -55,12 +56,23 @@ test('stars/xp by difficulty + nausea + one-shot animation ack', async () => {
 
   let pending = await request(app).get('/children/child1/animations/pending');
   assert.equal(pending.body.length, 1);
+  assert.equal(pending.body[0].seen_at, null);
+  assert.match(pending.body[0].delivered_at, /^\d{4}-\d{2}-\d{2}T/);
   const animId = pending.body[0].id;
 
   const ack1 = await request(app).post(`/children/child1/animations/${animId}/ack`);
   assert.equal(ack1.body.acknowledged, true);
+  assert.match(ack1.body.seen_at, /^\d{4}-\d{2}-\d{2}T/);
   const ack2 = await request(app).post(`/children/child1/animations/${animId}/ack`);
   assert.equal(ack2.body.acknowledged, false);
+
+  pending = await request(app).get('/children/child1/animations/pending');
+  assert.equal(pending.body.length, 0);
+
+  const events = await request(app).get(`/tasks/${taskId}/events`);
+  assert.equal(events.status, 200);
+  assert.equal(events.body[0].event_type, 'confirmation_rejected');
+  assert.deepEqual(JSON.parse(events.body[0].payload_json), { reason: null });
 
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'parent').send({ to_status: 'confirmed_done' });
@@ -112,6 +124,110 @@ test('lists active tasks by due date with can_actions and task details', async (
 
   const afterConfirm = await request(app).get('/tasks?child_user_id=child1');
   assert.deepEqual(afterConfirm.body.map(t => t.title), ['Late task']);
+});
+
+test('role headers are enforced on mutating child, parent, and comment endpoints', async () => {
+  const { app } = setup();
+  const create = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Role task', source: 'manual', source_external_id: 'role1' });
+  const taskId = create.body.id;
+
+  const parentPlanning = await request(app).patch(`/tasks/${taskId}/planning`).set('x-role', 'parent').send({ difficulty: 'easy', planned_window: 'today' });
+  assert.equal(parentPlanning.status, 403);
+
+  const missingRoleStarted = await request(app).patch(`/tasks/${taskId}/status`).send({ to_status: 'started' });
+  assert.equal(missingRoleStarted.status, 400);
+
+  const childStarted = await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'started' });
+  assert.equal(childStarted.status, 200);
+
+  const parentThinksDone = await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'parent').send({ to_status: 'thinks_done' });
+  assert.equal(parentThinksDone.status, 400);
+
+  const childThinksDone = await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
+  assert.equal(childThinksDone.status, 200);
+
+  const childConfirm = await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'confirmed_done' });
+  assert.equal(childConfirm.status, 400);
+
+  const childReject = await request(app).post(`/tasks/${taskId}/reject`).set('x-role', 'child').send({});
+  assert.equal(childReject.status, 403);
+
+  const missingCommentRole = await request(app).post(`/tasks/${taskId}/comments`).send({ message: 'No role' });
+  assert.equal(missingCommentRole.status, 403);
+});
+
+test('can_actions are status-based UI hints and active list excludes confirmed_done', async () => {
+  const { app } = setup();
+  const received = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Received', source: 'manual', source_external_id: 'hint-received', due_date: '2026-06-01' });
+  const started = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Started', source: 'manual', source_external_id: 'hint-started', due_date: '2026-06-02' });
+  const review = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Review', source: 'manual', source_external_id: 'hint-review', due_date: '2026-06-03' });
+  const done = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Done', source: 'manual', source_external_id: 'hint-done', due_date: '2026-06-04' });
+
+  await request(app).patch(`/tasks/${started.body.id}/status`).set('x-role', 'child').send({ to_status: 'started' });
+  await request(app).patch(`/tasks/${review.body.id}/status`).set('x-role', 'child').send({ to_status: 'started' });
+  await request(app).patch(`/tasks/${review.body.id}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
+  await request(app).patch(`/tasks/${done.body.id}/status`).set('x-role', 'child').send({ to_status: 'started' });
+  await request(app).patch(`/tasks/${done.body.id}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
+  await request(app).patch(`/tasks/${done.body.id}/status`).set('x-role', 'parent').send({ to_status: 'confirmed_done' });
+
+  const receivedDetail = await request(app).get(`/tasks/${received.body.id}`);
+  const startedDetail = await request(app).get(`/tasks/${started.body.id}`);
+  const reviewDetail = await request(app).get(`/tasks/${review.body.id}`);
+  const doneDetail = await request(app).get(`/tasks/${done.body.id}`);
+
+  assert.deepEqual(receivedDetail.body.can_actions, ['set_difficulty', 'set_planning', 'mark_started', 'comment']);
+  assert.deepEqual(startedDetail.body.can_actions, ['set_difficulty', 'set_planning', 'mark_thinks_done', 'comment']);
+  assert.deepEqual(reviewDetail.body.can_actions, ['comment', 'confirm_done', 'reject_done']);
+  assert.deepEqual(doneDetail.body.can_actions, ['comment']);
+
+  const list = await request(app).get('/tasks?child_user_id=child1');
+  assert.deepEqual(list.body.map(t => t.title), ['Received', 'Started', 'Review']);
+});
+
+test('events endpoint is sparse before reject and records reject event payload only after reject', async () => {
+  const { app } = setup();
+  const create = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Event task', source: 'manual', source_external_id: 'event1' });
+  const taskId = create.body.id;
+
+  let events = await request(app).get(`/tasks/${taskId}/events`);
+  assert.equal(events.status, 200);
+  assert.deepEqual(events.body, []);
+
+  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'started' });
+  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
+  await request(app).post(`/tasks/${taskId}/reject`).set('x-role', 'parent').send({ reason: 'Needs sources' });
+
+  events = await request(app).get(`/tasks/${taskId}/events`);
+  assert.equal(events.status, 200);
+  assert.equal(events.body.length, 1);
+  assert.equal(events.body[0].event_type, 'confirmation_rejected');
+  assert.deepEqual(JSON.parse(events.body[0].payload_json), { reason: 'Needs sources' });
+});
+
+test('runMigrations adds delivered_at to existing local task_feedback_animations tables non-destructively', () => {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE task_feedback_animations (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      child_user_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      animation_type TEXT NOT NULL CHECK(animation_type IN ('reject_nausea')),
+      animation_key TEXT NOT NULL UNIQUE,
+      seen_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO task_feedback_animations (id, task_id, child_user_id, event_id, animation_type, animation_key, seen_at, created_at)
+    VALUES ('anim1', 'task1', 'child1', 'event1', 'reject_nausea', 'key1', NULL, '2026-05-25T00:00:00.000Z');
+  `);
+
+  runMigrations(db);
+
+  const columns = db.prepare('PRAGMA table_info(task_feedback_animations)').all().map(c => c.name);
+  assert.equal(columns.includes('delivered_at'), true);
+  assert.equal(columns.includes('seen_at'), true);
+  const row = db.prepare('SELECT id, animation_key, delivered_at, seen_at FROM task_feedback_animations WHERE id=?').get('anim1');
+  assert.deepEqual(row, { id: 'anim1', animation_key: 'key1', delivered_at: null, seen_at: null });
 });
 
 test('creates and reads task comment thread', async () => {

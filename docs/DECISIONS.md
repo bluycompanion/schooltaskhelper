@@ -23,3 +23,11 @@
 - Reject ska trigga one-shot visuell feedback (hungerbar-färg + emoji från uppgift till hungerbar), med persistent state så animationen spelas exakt en gång per händelse.
 - Både parent och agent får bekräfta `confirmed_done` i v1.
 - Hungerbarens kapacitet ska vara variabel och bero på antal uppgifter.
+
+## 2026-05-25
+- SQLite är enda MVP-databas; alternativa hosted SQL-backends ingår inte i MVP-scope.
+- Lokal v1-auth använder enkla dev-headers (`x-role`, valfritt `x-user-id`) för API-validering under MVP-utveckling; detta är inte production auth.
+- `can_actions` är en roll-/statusnära UI-hint i plain language, inte auktorisation. Backendens muterande endpoints fortsätter vara auktoritativa för tillåtna roll/status-övergångar.
+- Backend event/audit-baseline är i scope för v1-spårbarhet, men synlig historik-UI är out of scope.
+- Reject-/feedback-animationer ska ha både `delivered_at` och `seen_at` så UI kan skilja leverans från faktisk visning/ack och spela varje händelse högst en gång.
+- Production deploy kräver explicit JW-godkännande och är inte godkänd i nuvarande dokumentationsuppdatering.

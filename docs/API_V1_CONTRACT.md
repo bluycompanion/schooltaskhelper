@@ -76,6 +76,15 @@ Response-item (kort):
 ### `GET /tasks/:taskId`
 Detaljvy för expanderat kort.
 
+### Mutation response shapes and frontend refresh behavior
+Current SQLite MVP mutation responses are intentionally small and stable:
+- `POST /agent/tasks` returns the created task row with status `received`, or the existing task row for the idempotent `source + source_external_id` case. It does not currently add `can_actions` to this mutation response; frontend should refetch `GET /tasks?child_user_id=...` or `GET /tasks/:taskId` when it needs hint-enriched state.
+- `PATCH /tasks/:taskId/planning` returns the updated task row after difficulty/planning changes. Refetch detail/list to receive `can_actions`.
+- `PATCH /tasks/:taskId/status` returns the updated task row after accepted status transitions. Refetch active list after `confirmed_done`, because active list excludes completed tasks.
+- `POST /tasks/:taskId/reject` returns `{ "ok": true }`; frontend should refetch task detail/list, progress, events only if needed for diagnostics, and `GET /children/:childUserId/animations/pending` for one-shot reject feedback.
+- `POST /tasks/:taskId/comments` returns the created comment row; frontend can append it locally or refetch `GET /tasks/:taskId/comments`.
+- `POST /children/:childUserId/animations/:animationId/ack` returns `{ acknowledged, seen_at }`; after `acknowledged: true`, the same animation will not appear in pending animations.
+
 ### `PATCH /tasks/:taskId/planning`
 Barn sätter svårighet + planering.
 
@@ -229,3 +238,48 @@ Det kräver persistens:
 - per child-view: `seen_at`/`delivered_at`
 
 API behöver därför stöd för att hämta och acka opelade animationsevents.
+
+### `GET /children/:childUserId/animations/pending`
+Hämtar osedda reject-/feedback-animationer för barnet.
+
+SQLite-MVP-beteende:
+- Returnerar endast rader där `seen_at IS NULL`.
+- Sätter `delivered_at` första gången en osedd animation levereras till klienten.
+- `seen_at` är `null` tills klienten ackar animationen.
+
+Response-item:
+```json
+{
+  "id": "uuid",
+  "task_id": "uuid",
+  "child_user_id": "uuid",
+  "event_id": "uuid",
+  "animation_type": "reject_nausea",
+  "animation_key": "text",
+  "delivered_at": "timestamp",
+  "seen_at": null,
+  "created_at": "timestamp"
+}
+```
+
+### `POST /children/:childUserId/animations/:animationId/ack`
+Markerar en levererad/osedd animation som sedd.
+
+Response:
+```json
+{
+  "acknowledged": true,
+  "seen_at": "timestamp"
+}
+```
+
+Om samma animation ackas igen returneras `acknowledged: false`.
+
+## SQLite MVP baseline notes (2026-05-25)
+- SQLite är MVP-databasen. `db/migrations/001_init_up.sql` är körbar baseline och enda aktiva schemaunderlag för MVP.
+- Lokal v1-auth/action använder enkla dev-headers: `x-role` (`child|parent|agent`) och valfritt `x-user-id` för kommentarer. Detta är inte production auth.
+- Plain language för `can_actions`: listan berättar vilka knappar som kan vara relevanta för en uppgifts nuvarande status. Den är en UI-hint, inte auktorisation. Frontend ska fortfarande separera barn-/föräldrakontroller med sin lokala rollkontext, och muterande endpoints gör auktoritativa roll/status-kontroller via `x-role`.
+- `GET /tasks/:taskId/events` finns för aktuell backend audit/event-trail, men eventtäckningen är ännu sparsam. Reject skriver `confirmation_rejected`; full historik för create/planning/status/reward är uppskjuten. Synlig historik-UI är out of scope för v1.
+- Reject-/feedback-animationer använder både `delivered_at` och `seen_at`: pending-read sätter `delivered_at`, ack sätter `seen_at`.
+- Production deploy kräver explicit JW-godkännande. Status: Not approved for production deploy.
+- Mer detaljerad reconciliation finns i `docs/API_DB_BASELINE_RECONCILIATION_2026-05-25.md`.
