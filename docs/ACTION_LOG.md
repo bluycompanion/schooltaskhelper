@@ -70,6 +70,7 @@
 
 ## 2026-05-26
 - Lade till rudimentärt lokalt GUI-verifieringsflöde före deploy: `npm run seed:dev` resetar demo-data för `child1`/`parent1`, frontend kan växla Barnvy/Vuxenvy via querystring och visar en liten lokal testpanel med reload.
+- Utökade demo-seeden med fler uppgifter för att testa sortering, planering, svårighetsgrad, start, klarmarkering och vuxenbekräftelse.
 - Lade till `docs/GUI_MANUAL_VERIFICATION.md` och `docs/plans/2026-05-26-rudimentary-gui-verification.md` med manuell verifieringschecklista och fortsatt deploy-gate.
 - Utökade backend/frontend-tester för dev seed-reset och querystring-baserad rollvy.
 - Lade till deploy-stöd för webhosting subpath: root `server.js`, `/health`, statisk build från `dist/web`, och Vite `base` via `VITE_BASE_PATH` så appen kan köras bakom `/dev/schooltaskhelper/`.
