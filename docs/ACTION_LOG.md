@@ -65,3 +65,5 @@
 - Tog UX-reviewns små polishnoteringar direkt: svenskade `Level` till `Nivå`, gjorde positiv save/status-feedback synlig och lade in hjälpkopy för kommentarens tomma Skicka-state.
 - QA godkände v1 backend/frontend active-task-slice med minor notes only: backend/frontend-tester, typecheck, build, `git diff --check`, npm audit, source review, lokal API-smoke, role separation, `can_actions`-semantik och one-shot animation delivery/ack passerade. Production deploy är fortfarande inte godkänd.
 - Uppdaterade release-prep/docs efter QA: README anger aktuell backend+frontend QA-baseline och `npm rebuild better-sqlite3` som lokal Node ABI-mitigering.
+- Utökade backend audit/event-trailen för SQLite-MVP: `task_created`, `planning_updated`, `status_changed`, `reward_granted`, `confirmation_rejected`, `animation_delivered`, `animation_acknowledged` och `comment_created` skrivs nu till `task_events` utan att införa synlig historik-UI.
+- Uppdaterade integrationstest och API-/reconciliation-dokumentation för den bredare eventtäckningen.

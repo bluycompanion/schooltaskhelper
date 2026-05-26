@@ -71,8 +71,9 @@ test('stars/xp by difficulty + nausea + one-shot animation ack', async () => {
 
   const events = await request(app).get(`/tasks/${taskId}/events`);
   assert.equal(events.status, 200);
-  assert.equal(events.body[0].event_type, 'confirmation_rejected');
-  assert.deepEqual(JSON.parse(events.body[0].payload_json), { reason: null });
+  const rejectEvent = events.body.find((event) => event.event_type === 'confirmation_rejected');
+  assert.ok(rejectEvent);
+  assert.deepEqual(JSON.parse(rejectEvent.payload_json), { reason: null, from_status: 'thinks_done', to_status: 'started', nausea_delta: 1 });
 
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'parent').send({ to_status: 'confirmed_done' });
@@ -184,24 +185,63 @@ test('can_actions are status-based UI hints and active list excludes confirmed_d
   assert.deepEqual(list.body.map(t => t.title), ['Received', 'Started', 'Review']);
 });
 
-test('events endpoint is sparse before reject and records reject event payload only after reject', async () => {
+test('events endpoint records task lifecycle, rewards, feedback delivery, and ack events', async () => {
   const { app } = setup();
-  const create = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Event task', source: 'manual', source_external_id: 'event1' });
+  const create = await request(app).post('/agent/tasks').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'Event task', source: 'manual', source_external_id: 'event1' });
   const taskId = create.body.id;
 
   let events = await request(app).get(`/tasks/${taskId}/events`);
   assert.equal(events.status, 200);
-  assert.deepEqual(events.body, []);
+  assert.deepEqual(events.body.map((event) => event.event_type), ['task_created']);
+  assert.equal(events.body[0].actor_ref, 'agent1');
+  assert.deepEqual(JSON.parse(events.body[0].payload_json), { source: 'manual', source_external_id: 'event1', hunger_delta: 3 });
 
-  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'started' });
-  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
-  await request(app).post(`/tasks/${taskId}/reject`).set('x-role', 'parent').send({ reason: 'Needs sources' });
+  await request(app).patch(`/tasks/${taskId}/planning`).set('x-role', 'child').set('x-user-id', 'child1').send({ difficulty: 'hard', planned_window: 'today' });
+  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').set('x-user-id', 'child1').send({ to_status: 'started' });
+  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').set('x-user-id', 'child1').send({ to_status: 'thinks_done' });
+  await request(app).post(`/tasks/${taskId}/reject`).set('x-role', 'parent').set('x-user-id', 'parent1').send({ reason: 'Needs sources' });
+  const pending = await request(app).get('/children/child1/animations/pending');
+  assert.equal(pending.body.length, 1);
+  await request(app).post(`/children/child1/animations/${pending.body[0].id}/ack`);
+  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').set('x-user-id', 'child1').send({ to_status: 'thinks_done' });
+  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'parent').set('x-user-id', 'parent1').send({ to_status: 'confirmed_done' });
+  await request(app).post(`/tasks/${taskId}/comments`).set('x-role', 'parent').set('x-user-id', 'parent1').send({ message: 'Bra jobbat.' });
 
   events = await request(app).get(`/tasks/${taskId}/events`);
   assert.equal(events.status, 200);
-  assert.equal(events.body.length, 1);
-  assert.equal(events.body[0].event_type, 'confirmation_rejected');
-  assert.deepEqual(JSON.parse(events.body[0].payload_json), { reason: 'Needs sources' });
+  assert.deepEqual(events.body.map((event) => event.event_type), [
+    'task_created',
+    'planning_updated',
+    'status_changed',
+    'status_changed',
+    'confirmation_rejected',
+    'animation_delivered',
+    'animation_acknowledged',
+    'status_changed',
+    'status_changed',
+    'reward_granted',
+    'comment_created'
+  ]);
+
+  const planningEvent = events.body.find((event) => event.event_type === 'planning_updated');
+  assert.equal(planningEvent.actor_ref, 'child1');
+  const planningPayload = JSON.parse(planningEvent.payload_json);
+  assert.deepEqual(planningPayload.difficulty, { from: 'unknown', to: 'hard' });
+  assert.deepEqual(planningPayload.planned_window, { from: 'unknown', to: 'today' });
+
+  const rejectEvent = events.body.find((event) => event.event_type === 'confirmation_rejected');
+  assert.equal(rejectEvent.actor_ref, 'parent1');
+  assert.deepEqual(JSON.parse(rejectEvent.payload_json), { reason: 'Needs sources', from_status: 'thinks_done', to_status: 'started', nausea_delta: 1 });
+
+  const rewardEvent = events.body.find((event) => event.event_type === 'reward_granted');
+  assert.deepEqual(JSON.parse(rewardEvent.payload_json), { difficulty: 'hard', xp_delta: 10, stars_delta: 10 });
+
+  const deliveredEvent = events.body.find((event) => event.event_type === 'animation_delivered');
+  assert.equal(JSON.parse(deliveredEvent.payload_json).animation_id, pending.body[0].id);
+
+  const commentEvent = events.body.find((event) => event.event_type === 'comment_created');
+  assert.equal(commentEvent.actor_ref, 'parent1');
+  assert.equal(typeof JSON.parse(commentEvent.payload_json).comment_id, 'string');
 });
 
 test('runMigrations adds delivered_at to existing local task_feedback_animations tables non-destructively', () => {

@@ -275,11 +275,39 @@ Response:
 
 Om samma animation ackas igen returneras `acknowledged: false`.
 
+### `GET /tasks/:taskId/events`
+Hämtar backendens audit/event-trail för en uppgift, sorterad stigande på `created_at`.
+
+Nuvarande SQLite-MVP skriver event för:
+- `task_created`
+- `planning_updated`
+- `status_changed`
+- `reward_granted`
+- `confirmation_rejected`
+- `animation_delivered`
+- `animation_acknowledged`
+- `comment_created`
+
+Response-item:
+```json
+{
+  "id": "uuid",
+  "task_id": "uuid",
+  "event_type": "status_changed",
+  "actor_type": "child",
+  "actor_ref": "child1",
+  "created_at": "timestamp",
+  "payload_json": "{\"from_status\":\"received\",\"to_status\":\"started\"}"
+}
+```
+
+Payload-shape är avsiktligt händelsespecifik i MVP men ska inte innehålla credentials eller känsligt auth-material.
+
 ## SQLite MVP baseline notes (2026-05-25)
 - SQLite är MVP-databasen. `db/migrations/001_init_up.sql` är körbar baseline och enda aktiva schemaunderlag för MVP.
 - Lokal v1-auth/action använder enkla dev-headers: `x-role` (`child|parent|agent`) och valfritt `x-user-id` för kommentarer. Detta är inte production auth.
 - Plain language för `can_actions`: listan berättar vilka knappar som kan vara relevanta för en uppgifts nuvarande status. Den är en UI-hint, inte auktorisation. Frontend ska fortfarande separera barn-/föräldrakontroller med sin lokala rollkontext, och muterande endpoints gör auktoritativa roll/status-kontroller via `x-role`.
-- `GET /tasks/:taskId/events` finns för aktuell backend audit/event-trail, men eventtäckningen är ännu sparsam. Reject skriver `confirmation_rejected`; full historik för create/planning/status/reward är uppskjuten. Synlig historik-UI är out of scope för v1.
+- `GET /tasks/:taskId/events` finns för aktuell backend audit/event-trail. MVP skriver nu events för create, planning, status, reward, reject, animation delivery/ack och comments. Synlig historik-UI är out of scope för v1.
 - Reject-/feedback-animationer använder både `delivered_at` och `seen_at`: pending-read sätter `delivered_at`, ack sätter `seen_at`.
 - Production deploy kräver explicit JW-godkännande. Status: Not approved for production deploy.
 - Mer detaljerad reconciliation finns i `docs/API_DB_BASELINE_RECONCILIATION_2026-05-25.md`.

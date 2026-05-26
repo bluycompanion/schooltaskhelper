@@ -26,6 +26,15 @@ function createApp(db) {
   const app = express();
   app.use(express.json());
 
+  function actorRef(req, fallbackRole) {
+    return req.headers['x-user-id'] || fallbackRole || 'system';
+  }
+
+  function emitTaskEvent(taskId, eventType, actorType, actorRefValue, payload = {}) {
+    db.prepare('INSERT INTO task_events (id, task_id, event_type, actor_type, actor_ref, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id(), taskId, eventType, actorType, actorRefValue, nowIso(), JSON.stringify(payload));
+  }
+
   function ensureProgress(childId) {
     db.prepare(`INSERT OR IGNORE INTO child_progress_state (child_user_id, hunger_score, hunger_capacity, xp_total, stars_total, level, nausea_score, updated_at)
                 VALUES (?,0,0,0,0,1,0,?)`).run(childId, nowIso());
@@ -70,6 +79,7 @@ function createApp(db) {
       db.prepare(`INSERT INTO tasks (id, child_user_id, title, subject, due_date, source, source_external_id, status, difficulty, planned_window, current_attempt_no, created_at, updated_at)
                   VALUES (?, ?, ?, ?, ?, ?, ?, 'received', 'unknown', 'unknown', 1, ?, ?)`).run(taskId, child_user_id, title, subject, due_date, source, source_external_id, nowIso(), nowIso());
       db.prepare('UPDATE child_progress_state SET hunger_score = hunger_score + 3, updated_at=? WHERE child_user_id=?').run(nowIso(), child_user_id);
+      emitTaskEvent(taskId, 'task_created', 'agent', actorRef(req, 'agent'), { source, source_external_id, hunger_delta: 3 });
       recalcHungerCapacity(child_user_id);
       return db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
     });
@@ -101,13 +111,19 @@ function createApp(db) {
     ensureProgress(task.child_user_id);
 
     const tx = db.transaction(() => {
+      const changes = {};
       if (difficulty && difficulty !== task.difficulty) {
         db.prepare('UPDATE tasks SET difficulty=?, updated_at=? WHERE id=?').run(difficulty, nowIso(), task.id);
-        applyHungerStep(task.id, task.current_attempt_no, 'difficulty_set', task.child_user_id);
+        changes.difficulty = { from: task.difficulty, to: difficulty };
+        changes.difficulty_hunger_applied = applyHungerStep(task.id, task.current_attempt_no, 'difficulty_set', task.child_user_id);
       }
       if (planned_window && planned_window !== task.planned_window) {
         db.prepare('UPDATE tasks SET planned_window=?, updated_at=? WHERE id=?').run(planned_window, nowIso(), task.id);
-        applyHungerStep(task.id, task.current_attempt_no, 'planning_set', task.child_user_id);
+        changes.planned_window = { from: task.planned_window, to: planned_window };
+        changes.planned_window_hunger_applied = applyHungerStep(task.id, task.current_attempt_no, 'planning_set', task.child_user_id);
+      }
+      if (Object.keys(changes).length > 0) {
+        emitTaskEvent(task.id, 'planning_updated', role, actorRef(req, role), { attempt_no: task.current_attempt_no, ...changes });
       }
       return db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
     });
@@ -130,14 +146,17 @@ function createApp(db) {
     if (!allowed) return res.status(400).json({ error: 'invalid transition' });
 
     const tx = db.transaction(() => {
-      if (to_status === 'started') applyHungerStep(task.id, task.current_attempt_no, 'status_started', task.child_user_id);
-      if (to_status === 'thinks_done') applyHungerStep(task.id, task.current_attempt_no, 'status_thinks_done', task.child_user_id);
+      let hungerApplied = false;
+      if (to_status === 'started') hungerApplied = applyHungerStep(task.id, task.current_attempt_no, 'status_started', task.child_user_id);
+      if (to_status === 'thinks_done') hungerApplied = applyHungerStep(task.id, task.current_attempt_no, 'status_thinks_done', task.child_user_id);
 
       db.prepare('UPDATE tasks SET status=?, updated_at=? WHERE id=?').run(to_status, nowIso(), task.id);
+      emitTaskEvent(task.id, 'status_changed', role, actorRef(req, role), { from_status: task.status, to_status, attempt_no: task.current_attempt_no, hunger_applied: hungerApplied });
 
       if (to_status === 'confirmed_done') {
         const points = starPoints(task.difficulty);
         db.prepare('UPDATE child_progress_state SET xp_total=xp_total+?, stars_total=stars_total+?, updated_at=? WHERE child_user_id=?').run(points, points, nowIso(), task.child_user_id);
+        emitTaskEvent(task.id, 'reward_granted', role, actorRef(req, role), { difficulty: task.difficulty, xp_delta: points, stars_delta: points });
       }
       recalcHungerCapacity(task.child_user_id);
       return db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
@@ -158,7 +177,7 @@ function createApp(db) {
     const tx = db.transaction(() => {
       const eventId = id();
       db.prepare('INSERT INTO task_events (id, task_id, event_type, actor_type, actor_ref, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(eventId, task.id, 'confirmation_rejected', role, role, nowIso(), JSON.stringify({ reason }));
+        .run(eventId, task.id, 'confirmation_rejected', role, actorRef(req, role), nowIso(), JSON.stringify({ reason, from_status: task.status, to_status: 'started', nausea_delta: 1 }));
       db.prepare('UPDATE tasks SET status=?, current_attempt_no=current_attempt_no+1, updated_at=? WHERE id=?').run('started', nowIso(), task.id);
       db.prepare('UPDATE child_progress_state SET nausea_score=nausea_score+1, nausea_updated_at=?, updated_at=? WHERE child_user_id=?')
         .run(nowIso(), nowIso(), task.child_user_id);
@@ -199,8 +218,12 @@ function createApp(db) {
     if (!task) return res.status(404).json({ error: 'not found' });
 
     const commentId = id();
-    db.prepare(`INSERT INTO task_comments (id, task_id, author_user_id, author_role, message, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)`).run(commentId, req.params.id, userId, role, message, nowIso());
+    const tx = db.transaction(() => {
+      db.prepare(`INSERT INTO task_comments (id, task_id, author_user_id, author_role, message, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?)`).run(commentId, req.params.id, userId, role, message, nowIso());
+      emitTaskEvent(req.params.id, 'comment_created', role, userId, { comment_id: commentId });
+    });
+    tx();
     res.status(201).json(db.prepare('SELECT * FROM task_comments WHERE id=?').get(commentId));
   });
 
@@ -215,16 +238,31 @@ function createApp(db) {
 
   app.get('/children/:childUserId/animations/pending', (req, res) => {
     const deliveredAt = nowIso();
-    db.prepare('UPDATE task_feedback_animations SET delivered_at=? WHERE child_user_id=? AND seen_at IS NULL AND delivered_at IS NULL')
-      .run(deliveredAt, req.params.childUserId);
+    const tx = db.transaction(() => {
+      const newlyDelivered = db.prepare('SELECT * FROM task_feedback_animations WHERE child_user_id=? AND seen_at IS NULL AND delivered_at IS NULL ORDER BY created_at ASC').all(req.params.childUserId);
+      db.prepare('UPDATE task_feedback_animations SET delivered_at=? WHERE child_user_id=? AND seen_at IS NULL AND delivered_at IS NULL')
+        .run(deliveredAt, req.params.childUserId);
+      for (const animation of newlyDelivered) {
+        emitTaskEvent(animation.task_id, 'animation_delivered', 'system', 'system', { animation_id: animation.id, animation_type: animation.animation_type, delivered_at: deliveredAt });
+      }
+    });
+    tx();
     const rows = db.prepare('SELECT * FROM task_feedback_animations WHERE child_user_id=? AND seen_at IS NULL ORDER BY created_at ASC').all(req.params.childUserId);
     res.json(rows);
   });
 
   app.post('/children/:childUserId/animations/:animationId/ack', (req, res) => {
     const seenAt = nowIso();
-    const r = db.prepare('UPDATE task_feedback_animations SET seen_at=? WHERE id=? AND child_user_id=? AND seen_at IS NULL')
-      .run(seenAt, req.params.animationId, req.params.childUserId);
+    const tx = db.transaction(() => {
+      const animation = db.prepare('SELECT * FROM task_feedback_animations WHERE id=? AND child_user_id=?').get(req.params.animationId, req.params.childUserId);
+      const r = db.prepare('UPDATE task_feedback_animations SET seen_at=? WHERE id=? AND child_user_id=? AND seen_at IS NULL')
+        .run(seenAt, req.params.animationId, req.params.childUserId);
+      if (r.changes === 1 && animation) {
+        emitTaskEvent(animation.task_id, 'animation_acknowledged', 'child', req.params.childUserId, { animation_id: animation.id, seen_at: seenAt });
+      }
+      return r;
+    });
+    const r = tx();
     res.json({ acknowledged: r.changes === 1, seen_at: r.changes === 1 ? seenAt : null });
   });
 
