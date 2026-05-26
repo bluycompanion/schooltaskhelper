@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { createApp } = require('../src/app');
 const { runMigrations } = require('../src/db');
+const { DEMO_CHILD_USER_ID, DEMO_PARENT_USER_ID, seedDevData } = require('../scripts/seed_dev_data');
 
 function setup() {
   const db = new Database(':memory:');
@@ -17,6 +18,34 @@ function setup() {
   const app = createApp(db);
   return { db, app };
 }
+
+test('seedDevData resets predictable local GUI verification data', async () => {
+  const { app, db } = setup();
+  await request(app).post('/agent/tasks').send({ child_user_id: DEMO_CHILD_USER_ID, title: 'Old manual task', source: 'manual', source_external_id: 'old-manual' });
+
+  seedDevData(db);
+  let list = await request(app).get(`/tasks?child_user_id=${DEMO_CHILD_USER_ID}`);
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.body.map((task) => [task.title, task.status]), [
+    ['Läs svenska kapitel 4', 'received'],
+    ['Gör matteuppgifter 12–18', 'started'],
+    ['Lämna in NO-labb', 'thinks_done'],
+  ]);
+
+  await request(app).patch(`/tasks/${list.body[0].id}/status`).set('x-role', 'child').send({ to_status: 'started' });
+  seedDevData(db);
+
+  list = await request(app).get(`/tasks?child_user_id=${DEMO_CHILD_USER_ID}`);
+  assert.deepEqual(list.body.map((task) => [task.source_external_id, task.status]), [
+    ['demo-received', 'received'],
+    ['demo-started', 'started'],
+    ['demo-review', 'thinks_done'],
+  ]);
+  assert.equal(
+    db.prepare('SELECT parent_user_id FROM child_parent_access WHERE child_user_id=?').get(DEMO_CHILD_USER_ID).parent_user_id,
+    DEMO_PARENT_USER_ID,
+  );
+});
 
 test('hunger +3 on new task and -1 progression capped at 3', async () => {
   const { app } = setup();

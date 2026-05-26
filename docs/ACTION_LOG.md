@@ -67,3 +67,8 @@
 - Uppdaterade release-prep/docs efter QA: README anger aktuell backend+frontend QA-baseline och `npm rebuild better-sqlite3` som lokal Node ABI-mitigering.
 - Utökade backend audit/event-trailen för SQLite-MVP: `task_created`, `planning_updated`, `status_changed`, `reward_granted`, `confirmation_rejected`, `animation_delivered`, `animation_acknowledged` och `comment_created` skrivs nu till `task_events` utan att införa synlig historik-UI.
 - Uppdaterade integrationstest och API-/reconciliation-dokumentation för den bredare eventtäckningen.
+
+## 2026-05-26
+- Lade till rudimentärt lokalt GUI-verifieringsflöde före deploy: `npm run seed:dev` resetar demo-data för `child1`/`parent1`, frontend kan växla Barnvy/Vuxenvy via querystring och visar en liten lokal testpanel med reload.
+- Lade till `docs/GUI_MANUAL_VERIFICATION.md` och `docs/plans/2026-05-26-rudimentary-gui-verification.md` med manuell verifieringschecklista och fortsatt deploy-gate.
+- Utökade backend/frontend-tester för dev seed-reset och querystring-baserad rollvy.

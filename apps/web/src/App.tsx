@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   SchoolTaskApiClient,
+  buildViewHref,
   getVisibleActions,
   type ActionDescriptor,
   type ChildProgress,
@@ -11,7 +12,7 @@ import {
   type TaskComment,
   type TaskSummary,
 } from './api/apiClient';
-import { getApiBaseUrl, getLocalViewContext } from './config';
+import { getApiBaseUrl, getLocalViewContext, isLocalDevMode } from './config';
 import './styles.css';
 
 interface LoadState {
@@ -110,6 +111,7 @@ function actionKey(taskId: string, actionId: TaskActionId): string {
 
 export default function App() {
   const context = useMemo(() => getLocalViewContext(), []);
+  const isDevMode = useMemo(() => isLocalDevMode(), []);
   const client = useMemo(
     () => new SchoolTaskApiClient({ baseUrl: getApiBaseUrl(), context }),
     [context],
@@ -322,6 +324,20 @@ export default function App() {
           </p>
         </div>
       </section>
+
+      {isDevMode ? (
+        <section className="testPanel" aria-label="Lokalt testläge">
+          <div>
+            <strong>Testläge</strong>
+            <p className="metaLine">Roll: {context.role} · child: {context.childUserId}</p>
+          </div>
+          <nav aria-label="Byt testvy">
+            <a className={context.role === 'child' ? 'active' : ''} href={buildViewHref('child', context.childUserId, context.childUserId)}>Barnvy</a>
+            <a className={context.role === 'parent' ? 'active' : ''} href={buildViewHref('parent', context.childUserId, 'parent1')}>Vuxenvy</a>
+          </nav>
+          <button className="secondary" type="button" onClick={() => void loadAll()}>Ladda om</button>
+        </section>
+      ) : null}
 
       <div className="liveRegion" role="status" aria-live="polite">
         {statusMessage}

@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev:web": "vite --host 127.0.0.1",
+    "seed:dev": "node scripts/seed_dev_data.js",
     "build:web": "vite build",
     "typecheck:web": "tsc -b tsconfig.json",
     "test:web": "tsc -p apps/web/tsconfig.node-test.json && node --test \"$PWD/node_modules/.tmp/web-tests/api/apiClient.test.js\"",

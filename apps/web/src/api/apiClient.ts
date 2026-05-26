@@ -10,6 +10,7 @@ export type TaskActionId =
   | 'confirm_done'
   | 'reject_done'
   | 'comment';
+export { buildViewHref } from './viewContext';
 
 export interface LocalViewContext {
   role: Role;

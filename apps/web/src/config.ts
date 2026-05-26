@@ -1,20 +1,22 @@
-import type { LocalViewContext, Role } from './api/apiClient';
+import { resolveViewContext } from './api/viewContext';
 
 const defaultChildUserId = 'child1';
-const validRoles: Role[] = ['child', 'parent', 'agent'];
 
-function roleFromEnv(value: string | undefined): Role {
-  return validRoles.includes(value as Role) ? (value as Role) : 'child';
-}
-
-export function getLocalViewContext(): LocalViewContext {
-  const childUserId = import.meta.env.VITE_CHILD_USER_ID || defaultChildUserId;
-  const role = roleFromEnv(import.meta.env.VITE_ROLE);
-  const userId = import.meta.env.VITE_USER_ID || (role === 'child' ? childUserId : role);
-
-  return { role, childUserId, userId };
+export function getLocalViewContext() {
+  const search = typeof window === 'undefined' ? '' : window.location.search;
+  return resolveViewContext(search, {
+    role: import.meta.env.VITE_ROLE,
+    childUserId: import.meta.env.VITE_CHILD_USER_ID || defaultChildUserId,
+    userId: import.meta.env.VITE_USER_ID,
+  });
 }
 
 export function getApiBaseUrl(): string {
   return import.meta.env.VITE_API_BASE_URL || '';
+}
+
+export function isLocalDevMode(): boolean {
+  if (import.meta.env.DEV) return true;
+  if (typeof window === 'undefined') return false;
+  return window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
 }

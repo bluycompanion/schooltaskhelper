@@ -6,6 +6,7 @@ import {
   type LocalViewContext,
   type TaskSummary,
 } from './apiClient';
+import { buildViewHref, resolveViewContext } from './viewContext';
 
 function makeFetchRecorder() {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -63,6 +64,22 @@ test('does not show parent child-planning controls even if status-level hints in
   };
 
   assert.deepEqual(getVisibleActions(noisyTask, parentContext).map((action) => action.id), ['comment']);
+});
+
+test('resolves local role switcher context from querystring before env defaults', () => {
+  assert.deepEqual(
+    resolveViewContext(
+      '?role=parent&child_user_id=demo-child&user_id=demo-parent',
+      { role: 'child', childUserId: 'env-child', userId: 'env-child' },
+    ),
+    { role: 'parent', childUserId: 'demo-child', userId: 'demo-parent' },
+  );
+  assert.deepEqual(resolveViewContext('?role=bogus', { role: 'child', childUserId: 'child1' }), {
+    role: 'child',
+    childUserId: 'child1',
+    userId: 'child1',
+  });
+  assert.equal(buildViewHref('parent', 'child1', 'parent1'), '?role=parent&child_user_id=child1&user_id=parent1');
 });
 
 test('builds real API paths for active tasks, detail, comments, progress, and pending animations', async () => {

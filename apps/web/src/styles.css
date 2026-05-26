@@ -159,6 +159,42 @@ h3 {
   font-weight: 700;
 }
 
+.testPanel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+  border: 1px dashed #cfc4b1;
+  border-radius: 20px;
+  background: #fbf7eb;
+  padding: 0.75rem;
+}
+
+.testPanel nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.testPanel a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d7cdbb;
+  border-radius: 999px;
+  padding: 0 0.9rem;
+  color: #21312a;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.testPanel a.active {
+  background: #285d49;
+  color: #fffdf7;
+}
+
 .liveRegion:empty {
   display: none;
 }
