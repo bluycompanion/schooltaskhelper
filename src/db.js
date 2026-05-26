@@ -25,6 +25,11 @@ function runMigrations(db) {
     ensureColumn(db, 'task_feedback_animations', 'delivered_at', 'TEXT');
     ensureColumn(db, 'task_feedback_animations', 'seen_at', 'TEXT');
   }
+
+  const tasksTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'").get();
+  if (tasksTable) {
+    ensureColumn(db, 'tasks', 'reward_collected_at', 'TEXT');
+  }
 }
 
 module.exports = { openDb, runMigrations };

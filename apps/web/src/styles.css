@@ -113,6 +113,12 @@ button.danger {
   font-size: 0.9rem;
 }
 
+.subMetaLine {
+  margin: 0.15rem 0 0;
+  color: #8f8778;
+  font-size: 0.8rem;
+}
+
 h1,
 h2,
 h3,
@@ -221,14 +227,20 @@ h3 {
 }
 
 .taskCardHeader {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-start;
-  justify-content: space-between;
+  position: relative;
+  padding-right: 3rem; /* Make room for absolute expand arrow */
 }
 
 .expandButton {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40px;
+  height: 40px;
+  background: transparent !important;
+  color: #5d685f !important;
+  border: none !important;
+  font-size: 0.8rem;
 }
 
 .chips,
@@ -297,28 +309,44 @@ legend,
   height: 1.1rem;
 }
 
-.commentsList {
-  display: grid;
+.tinyActions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  margin: 0 0 0.85rem;
-  padding: 0;
-  list-style: none;
+  margin-bottom: 1rem;
 }
 
-.commentsList li {
-  border-left: 4px solid #d1a94c;
-  border-radius: 12px;
+button.tiny {
+  min-width: 0;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 0.6rem;
+  font-size: 0.75rem;
+  border-radius: 6px;
+}
+
+.compactCommentForm {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.compactCommentForm input {
+  flex: 1;
+  min-height: 44px;
+  border: 1px solid #d7cdbb;
+  border-radius: 999px;
+  padding: 0 1rem;
   background: #fffdf7;
-  padding: 0.65rem 0.75rem;
 }
 
-.commentsList p {
-  margin-bottom: 0;
-}
-
-.commentForm {
+.compactCommentForm button {
+  flex: 0 0 44px;
+  min-width: 44px;
+  width: 44px;
+  padding: 0;
   display: grid;
-  gap: 0.5rem;
+  place-items: center;
 }
 
 textarea {
@@ -380,11 +408,12 @@ textarea {
   }
 
   .taskCardHeader {
-    display: grid;
+    padding-right: 2.5rem;
   }
 
   .expandButton {
-    width: 100%;
+    top: -0.25rem;
+    right: -0.25rem;
   }
 
   .actions button,
@@ -403,4 +432,134 @@ textarea {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* =========================================
+   UX Refinement Additions (Gamification, Popups)
+   ========================================= */
+
+.actionPopupBackdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+}
+
+.actionPopup {
+  background: #fffdf7;
+  border: 1px solid #ded7c8;
+  border-radius: 24px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: 0 10px 30px rgb(58 44 23 / 15%);
+  animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.actionPopup h3 {
+  margin-top: 0;
+  margin-bottom: 1.25rem;
+  text-align: center;
+  font-size: 1.3rem;
+}
+
+.popupButtons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.popupButtons button {
+  width: 100%;
+  min-height: 64px;
+  font-size: 1.15rem;
+  border-radius: 16px;
+  border-width: 2px;
+}
+
+.popupClose {
+  width: 100%;
+  background: transparent !important;
+  border: none !important;
+  color: #5d685f !important;
+  margin-top: 0.5rem;
+  min-height: 48px;
+}
+
+@keyframes popIn {
+  from { transform: scale(0.85); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.flyingFood {
+  position: fixed;
+  font-size: 2.5rem;
+  pointer-events: none;
+  z-index: 2000;
+  transition: all 0.75s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.iconButton {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+}
+
+.historyLog {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.historyLog li {
+  padding: 0.4rem 0;
+  border-bottom: 1px dashed #e7e0d0;
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.historyLog li:last-child {
+  border-bottom: none;
+}
+
+.logTime {
+  color: #8f8778;
+  font-variant-numeric: tabular-nums;
+  margin-right: 0.4rem;
+}
+
+.logMsg {
+  color: #21312a;
+}
+
+.commentsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.commentsHeader h3 {
+  margin: 0;
+}
+
+.commentsHeader .iconButton {
+  width: auto;
+  padding: 0 0.75rem;
+}
+
+.commentsSection {
+  margin-top: 1rem;
 }

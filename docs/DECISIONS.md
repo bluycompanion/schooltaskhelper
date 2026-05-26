@@ -31,3 +31,20 @@
 - Backend event/audit-baseline Ã¤r i scope fÃ¶r v1-spÃ¥rbarhet, men synlig historik-UI Ã¤r out of scope.
 - Reject-/feedback-animationer ska ha bÃ¥de `delivered_at` och `seen_at` sÃ¥ UI kan skilja leverans frÃ¥n faktisk visning/ack och spela varje hÃ¤ndelse hÃ¶gst en gÃ¥ng.
 - Production deploy krÃ¤ver explicit JW-godkÃ¤nnande och Ã¤r inte godkÃ¤nd i nuvarande dokumentationsuppdatering.
+
+## 2026-05-26
+- **UI/UX Refinement (Gamification & Kompakthet):**
+  - **En knapp:** Enbart nÃ¤sta logiska Ã¥tgÃ¤rd visas pÃ¥ det oexpanderade kortet.
+  - **Expandera:** En liten pil (ner/upp) i Ã¶vre hÃ¶gra hÃ¶rnet anvÃ¤nds. Endast en uppgift kan vara expanderad Ã¥t gÃ¥ngen.
+  - **Ã…ngra/Ã„ndra:** MÃ¶jlighet att Ã¤ndra tidigare val finns tillgÃ¤ngligt nÃ¤r kortet expanderas.
+  - **Popups:** Inga radioknappar fÃ¶r val. Klick Ã¶ppnar en modal/popup med stora touch-vÃ¤nliga knappar (t.ex. tre nivÃ¥er pÃ¥ rad). Val sparas automatiskt vid klick.
+  - **Gamification:** Visuell animation (mat-emojis flyger frÃ¥n den klickade knappen till "hunger-baren") sker vid varje framsteg fÃ¶r att belÃ¶na direkt.
+  - **Logg:** En kompakt, rullbar historiklogg lÃ¤ggs till i den expanderade vyn.
+  - **Kommentarer:** Minimeras och dÃ¶ljs bakom ett knapptryck (t.ex. en penna) inne i den expanderade vyn fÃ¶r att undvika onÃ¶dig platsbrist.
+
+### Ultraminimalistiskt Uppgiftskort (2026-05-26)
+- **Liten meta-text:** Stora bubblor/chips togs bort till förmån för en liten textrad med fetstilta värden (.subMetaLine).
+- **Kompakta listor:** Kommentarer flyttades in inline i loggen/tidslinjen. Tidslinjen renderas i omvänd kronologisk ordning med datum och händelse på samma rad för att spara vertikal yta.
+- **Små åtgärdsknappar:** I den expanderade vyn lades en rad med mycket små knappar till (.tinyActions) för att manuellt ändra svårighet, plan och status. Statusval kan nu göras via popup-fönster precis som de andra valen.
+- **Fast pil-ikon:** Expanderings-ikonen låstes (position: absolute) i översta högra hörnet för att undvika brytningar.
+- **Källa flyttad:** Visning av datakälla flyttades till att vara det allra första elementet i loggen istället för en fristående rubrik.

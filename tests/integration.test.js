@@ -27,19 +27,24 @@ test('seedDevData resets predictable local GUI verification data', async () => {
   let list = await request(app).get(`/tasks?child_user_id=${DEMO_CHILD_USER_ID}`);
   assert.equal(list.status, 200);
   assert.deepEqual(list.body.map((task) => [task.title, task.status]), [
-    ['Läs svenska kapitel 4', 'received'],
-    ['Gör matteuppgifter 12–18', 'started'],
     ['Lämna in NO-labb', 'thinks_done'],
+    ['Läs svenska kapitel 4', 'received'],
+    ['Träna glosor i engelska', 'received'],
+    ['Gör matteuppgifter 12–18', 'started'],
+    ['Rensa skolväskan', 'received'],
   ]);
 
-  await request(app).patch(`/tasks/${list.body[0].id}/status`).set('x-role', 'child').send({ to_status: 'started' });
+  const taskToPatch = list.body.find(t => t.source_external_id === 'demo-received');
+  await request(app).patch(`/tasks/${taskToPatch.id}/status`).set('x-role', 'child').send({ to_status: 'started' });
   seedDevData(db);
 
   list = await request(app).get(`/tasks?child_user_id=${DEMO_CHILD_USER_ID}`);
   assert.deepEqual(list.body.map((task) => [task.source_external_id, task.status]), [
-    ['demo-received', 'received'],
-    ['demo-started', 'started'],
     ['demo-review', 'thinks_done'],
+    ['demo-received', 'received'],
+    ['demo-planning', 'received'],
+    ['demo-started', 'started'],
+    ['demo-no-due', 'received'],
   ]);
   assert.equal(
     db.prepare('SELECT parent_user_id FROM child_parent_access WHERE child_user_id=?').get(DEMO_CHILD_USER_ID).parent_user_id,
@@ -106,6 +111,7 @@ test('stars/xp by difficulty + nausea + one-shot animation ack', async () => {
 
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'parent').send({ to_status: 'confirmed_done' });
+  await request(app).post(`/tasks/${taskId}/collect_reward`).set('x-role', 'child').send();
   progress = await request(app).get('/children/child1/progress');
   assert.equal(progress.body.stars_total, 10);
   assert.equal(progress.body.xp_total, 10);
@@ -146,6 +152,7 @@ test('lists active tasks by due date with can_actions and task details', async (
   await request(app).patch(`/tasks/${early.body.id}/status`).set('x-role', 'child').send({ to_status: 'started' });
   await request(app).patch(`/tasks/${early.body.id}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
   await request(app).patch(`/tasks/${early.body.id}/status`).set('x-role', 'parent').send({ to_status: 'confirmed_done' });
+  await request(app).post(`/tasks/${early.body.id}/collect_reward`).set('x-role', 'child').send();
 
   const detail = await request(app).get(`/tasks/${late.body.id}`);
   assert.equal(detail.status, 200);
@@ -199,6 +206,7 @@ test('can_actions are status-based UI hints and active list excludes confirmed_d
   await request(app).patch(`/tasks/${done.body.id}/status`).set('x-role', 'child').send({ to_status: 'started' });
   await request(app).patch(`/tasks/${done.body.id}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
   await request(app).patch(`/tasks/${done.body.id}/status`).set('x-role', 'parent').send({ to_status: 'confirmed_done' });
+  await request(app).post(`/tasks/${done.body.id}/collect_reward`).set('x-role', 'child').send();
 
   const receivedDetail = await request(app).get(`/tasks/${received.body.id}`);
   const startedDetail = await request(app).get(`/tasks/${started.body.id}`);
@@ -234,6 +242,7 @@ test('events endpoint records task lifecycle, rewards, feedback delivery, and ac
   await request(app).post(`/children/child1/animations/${pending.body[0].id}/ack`);
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').set('x-user-id', 'child1').send({ to_status: 'thinks_done' });
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'parent').set('x-user-id', 'parent1').send({ to_status: 'confirmed_done' });
+  await request(app).post(`/tasks/${taskId}/collect_reward`).set('x-role', 'child').set('x-user-id', 'child1').send();
   await request(app).post(`/tasks/${taskId}/comments`).set('x-role', 'parent').set('x-user-id', 'parent1').send({ message: 'Bra jobbat.' });
 
   events = await request(app).get(`/tasks/${taskId}/events`);
@@ -248,6 +257,7 @@ test('events endpoint records task lifecycle, rewards, feedback delivery, and ac
     'animation_acknowledged',
     'status_changed',
     'status_changed',
+    'reward_available',
     'reward_granted',
     'comment_created'
   ]);

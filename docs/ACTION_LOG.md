@@ -75,3 +75,6 @@
 - UtÃ¶kade backend/frontend-tester fÃ¶r dev seed-reset och querystring-baserad rollvy.
 - Lade till deploy-stÃ¶d fÃ¶r webhosting subpath: root `server.js`, `/health`, statisk build frÃ¥n `dist/web`, och Vite `base` via `VITE_BASE_PATH` sÃ¥ appen kan kÃ¶ras bakom `/dev/schooltaskhelper/`.
 - KÃ¶rde dev-deploy lokalt pÃ¥ `PORT=4321` med seedad demo-data, rebuilt `better-sqlite3` fÃ¶r aktuell Node, och la in live Caddy-route fÃ¶r `/dev/schooltaskhelper` via admin-API.
+
+- 2026-05-26: Genomförde en ultraminimalistisk uppdatering av gränssnittet. Ersatte stora etiketter med liten text, kombinerade kommentarer och historik till en kompakt, omvänd tidslinje, lade till små knappar för att ändra status/plan/svårighet manuellt från expanderad vy, samt flyttade källinformation in i loggen.
+- 2026-05-26: Hardade frontendens tidslinje-rendering mot trasiga event-payloads (safe JSON-parse med fallback) och rattade saving-state key for popup-val av svarighet/planering sa ratt action lases under sparning.

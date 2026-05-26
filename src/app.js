@@ -10,16 +10,19 @@ function starPoints(difficulty) {
   return 6;
 }
 
-function canActions(status) {
-  if (status === 'received') return ['set_difficulty', 'set_planning', 'mark_started', 'comment'];
-  if (status === 'started') return ['set_difficulty', 'set_planning', 'mark_thinks_done', 'comment'];
-  if (status === 'thinks_done') return ['comment', 'confirm_done', 'reject_done'];
-  if (status === 'confirmed_done') return ['comment'];
+function canActions(task) {
+  if (task.status === 'received') return ['set_difficulty', 'set_planning', 'mark_started', 'comment'];
+  if (task.status === 'started') return ['set_difficulty', 'set_planning', 'mark_thinks_done', 'comment'];
+  if (task.status === 'thinks_done') return ['comment', 'confirm_done', 'reject_done'];
+  if (task.status === 'confirmed_done') {
+    if (!task.reward_collected_at) return ['collect_reward', 'comment'];
+    return ['comment'];
+  }
   return ['comment'];
 }
 
 function withCanActions(task) {
-  return task ? { ...task, can_actions: canActions(task.status) } : task;
+  return task ? { ...task, can_actions: canActions(task) } : task;
 }
 
 function createApp(db) {
@@ -91,7 +94,7 @@ function createApp(db) {
     const childId = req.query.child_user_id;
     if (!childId) return res.status(400).json({ error: 'child_user_id required' });
     const rows = db.prepare(`SELECT * FROM tasks
-                             WHERE child_user_id = ? AND status != 'confirmed_done'
+                             WHERE child_user_id = ? AND (status != 'confirmed_done' OR reward_collected_at IS NULL)
                              ORDER BY due_date IS NULL ASC, due_date ASC, created_at ASC`).all(childId);
     res.json(rows.map(withCanActions));
   });
@@ -143,7 +146,11 @@ function createApp(db) {
       (role === 'child' && task.status === 'started' && to_status === 'thinks_done') ||
       ((role === 'parent' || role === 'agent') && task.status === 'thinks_done' && to_status === 'confirmed_done')
     );
-    if (!allowed) return res.status(400).json({ error: 'invalid transition' });
+    if (!allowed) {
+      if (role === 'child' && task.status === 'thinks_done') return res.status(400).json({ error: 'Endast en vuxen kan markera uppgiften som helt klar.' });
+      if (to_status === 'received' || to_status === 'started') return res.status(400).json({ error: 'Det går inte att backa statusen på detta sätt.' });
+      return res.status(400).json({ error: `Otillåten statusövergång från '${task.status}' till '${to_status}' för rollen '${role}'.` });
+    }
 
     const tx = db.transaction(() => {
       let hungerApplied = false;
@@ -154,11 +161,29 @@ function createApp(db) {
       emitTaskEvent(task.id, 'status_changed', role, actorRef(req, role), { from_status: task.status, to_status, attempt_no: task.current_attempt_no, hunger_applied: hungerApplied });
 
       if (to_status === 'confirmed_done') {
-        const points = starPoints(task.difficulty);
-        db.prepare('UPDATE child_progress_state SET xp_total=xp_total+?, stars_total=stars_total+?, updated_at=? WHERE child_user_id=?').run(points, points, nowIso(), task.child_user_id);
-        emitTaskEvent(task.id, 'reward_granted', role, actorRef(req, role), { difficulty: task.difficulty, xp_delta: points, stars_delta: points });
+        emitTaskEvent(task.id, 'reward_available', role, actorRef(req, role), { difficulty: task.difficulty });
       }
       recalcHungerCapacity(task.child_user_id);
+      return db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
+    });
+
+    res.json(tx());
+  });
+
+  app.post('/tasks/:id/collect_reward', (req, res) => {
+    const role = req.headers['x-role'];
+    if (role !== 'child') return res.status(403).json({ error: 'only child can collect reward' });
+    const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'not found' });
+    if (task.status !== 'confirmed_done') return res.status(400).json({ error: 'task not confirmed' });
+    if (task.reward_collected_at) return res.status(400).json({ error: 'reward already collected' });
+    ensureProgress(task.child_user_id);
+
+    const tx = db.transaction(() => {
+      const points = starPoints(task.difficulty);
+      db.prepare('UPDATE tasks SET reward_collected_at=?, updated_at=? WHERE id=?').run(nowIso(), nowIso(), task.id);
+      db.prepare('UPDATE child_progress_state SET xp_total=xp_total+?, stars_total=stars_total+?, updated_at=? WHERE child_user_id=?').run(points, points, nowIso(), task.child_user_id);
+      emitTaskEvent(task.id, 'reward_granted', role, actorRef(req, role), { difficulty: task.difficulty, xp_delta: points, stars_delta: points });
       return db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
     });
 

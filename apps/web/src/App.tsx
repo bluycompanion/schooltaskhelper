@@ -3,6 +3,7 @@ import {
   SchoolTaskApiClient,
   buildViewHref,
   getVisibleActions,
+  ApiError,
   type ActionDescriptor,
   type ChildProgress,
   type Difficulty,
@@ -10,6 +11,8 @@ import {
   type PlannedWindow,
   type TaskActionId,
   type TaskComment,
+  type TaskEvent,
+  type TaskStatus,
   type TaskSummary,
 } from './api/apiClient';
 import { getApiBaseUrl, getLocalViewContext, isLocalDevMode } from './config';
@@ -28,11 +31,6 @@ type CommentsState = {
   draft: string;
   saving: boolean;
   inputError: string | null;
-};
-
-type PlanningDraft = {
-  difficulty: Difficulty;
-  planned_window: PlannedWindow;
 };
 
 const difficultyLabel: Record<Difficulty, string> = {
@@ -71,15 +69,21 @@ function hungerLabel(progress: ChildProgress | null): string {
 }
 
 function onlineErrorCopy(error: unknown, fallback = 'Det gick inte att spara just nu. Försök igen.'): string {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'Du behöver internet för att använda appen.';
-  if (error instanceof TypeError) return 'Du behöver internet för att använda appen.';
-  return fallback;
+  if (error instanceof ApiError) {
+    const payloadErr = (error.payload as any)?.error;
+    if (payloadErr) return payloadErr;
+    return `${fallback} [HTTP ${error.status}]`;
+  }
+  const details = error instanceof Error ? ` [Detaljer: ${error.message} (${error.name})]` : ` [Detaljer: ${String(error)}]`;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'Du behöver internet för att använda appen.' + details;
+  if (error instanceof TypeError) return 'Du behöver internet för att använda appen.' + details;
+  return fallback + details;
 }
 
 function taskHelpText(task: TaskSummary, role: string): string {
   if (task.status === 'thinks_done' && role === 'child') return 'Väntar på att en vuxen kollar.';
   if (task.status === 'confirmed_done') return 'Uppgiften är klar.';
-  return 'Kommentera om något behöver förklaras.';
+  return 'Gör ett val för att komma vidare.';
 }
 
 function nextStatusForAction(actionId: TaskActionId) {
@@ -105,8 +109,18 @@ function successCopy(actionId: TaskActionId): string {
   return 'Sparat.';
 }
 
-function actionKey(taskId: string, actionId: TaskActionId): string {
+function actionKey(taskId: string, actionId: TaskActionId | string): string {
   return `${taskId}:${actionId}`;
+}
+
+function parseEventPayload(payloadJson: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(payloadJson || '{}');
+    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+  } catch {
+    // Keep timeline resilient if one event payload is malformed.
+  }
+  return {};
 }
 
 export default function App() {
@@ -119,17 +133,21 @@ export default function App() {
   const [state, setState] = useState<LoadState>({ tasks: [], progress: null, animations: [] });
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [commentsByTask, setCommentsByTask] = useState<Record<string, CommentsState>>({});
-  const [planningDrafts, setPlanningDrafts] = useState<Record<string, PlanningDraft>>({});
+  const [eventsByTask, setEventsByTask] = useState<Record<string, TaskEvent[]>>({});
+  const [activePopup, setActivePopup] = useState<{ taskId: string, type: 'difficulty' | 'planning' | 'status' } | null>(null);
+  const [flyingEmojis, setFlyingEmojis] = useState<{ id: string; emoji: string; x: number; y: number }[]>([]);
+
   const [savingActions, setSavingActions] = useState<Record<string, boolean>>({});
   const [cardErrors, setCardErrors] = useState<Record<string, string | null>>({});
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [feedback, setFeedback] = useState<{ message: string; motion: boolean } | null>(null);
   const playedAnimations = useRef<Set<string>>(new Set());
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (isInitial = false) => {
+    if (isInitial) setLoading(true);
     setListError(null);
     try {
       const [tasks, progress] = await Promise.all([
@@ -138,22 +156,15 @@ export default function App() {
       ]);
       const animations = context.role === 'child' ? await client.getPendingAnimations(context.childUserId) : [];
       setState({ tasks, progress, animations });
-      setPlanningDrafts((current) => {
-        const next = { ...current };
-        tasks.forEach((task) => {
-          next[task.id] = next[task.id] ?? { difficulty: task.difficulty, planned_window: task.planned_window };
-        });
-        return next;
-      });
     } catch (error) {
       setListError(onlineErrorCopy(error, 'Det gick inte att hämta uppgifterna just nu.'));
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   }, [client, context.childUserId, context.role]);
 
   useEffect(() => {
-    void loadAll();
+    void loadAll(true);
   }, [loadAll]);
 
   const loadComments = useCallback(async (taskId: string, force = false) => {
@@ -187,18 +198,115 @@ export default function App() {
     }
   }, [client, commentsByTask]);
 
+  const loadEvents = useCallback(async (taskId: string) => {
+    try {
+      const events = await client.listEvents(taskId);
+      setEventsByTask((current) => ({ ...current, [taskId]: events }));
+    } catch (error) {
+      console.error('Kunde inte hämta händelser', error);
+    }
+  }, [client]);
+
   const toggleExpanded = (task: TaskSummary) => {
     const nextTaskId = expandedTaskId === task.id ? null : task.id;
     setExpandedTaskId(nextTaskId);
-    if (nextTaskId) void loadComments(task.id);
+    if (nextTaskId) {
+      void loadEvents(task.id);
+      void loadComments(task.id);
+    }
   };
 
-  const runAction = async (task: TaskSummary, action: ActionDescriptor) => {
+  const spawnEmoji = (emoji: string, e?: React.MouseEvent) => {
+    let x = window.innerWidth / 2;
+    let y = window.innerHeight / 2;
+    if (e && 'clientX' in e) {
+      x = e.clientX - 20;
+      y = e.clientY - 20;
+    }
+    const newEmoji = { id: Math.random().toString(), emoji, x, y };
+    setFlyingEmojis(prev => [...prev, newEmoji]);
+    
+    setTimeout(() => {
+       const avatarEl = document.getElementById('main-avatar');
+       if (avatarEl) {
+         const avatarRect = avatarEl.getBoundingClientRect();
+         setFlyingEmojis(prev => prev.map(em => em.id === newEmoji.id ? { ...em, x: avatarRect.left + 16, y: avatarRect.top + 16 } : em));
+       }
+    }, 50);
+
+    setTimeout(() => {
+      setFlyingEmojis(prev => prev.filter(em => em.id !== newEmoji.id));
+    }, 800);
+  };
+
+  const savePlanningPopup = async (task: TaskSummary, type: 'difficulty' | 'planning', value: string, e: React.MouseEvent) => {
+    const syntheticEvent = { clientX: e.clientX, clientY: e.clientY } as React.MouseEvent;
+    setActivePopup(null);
+    const draft = type === 'difficulty' ? { difficulty: value as Difficulty, planned_window: task.planned_window } : { difficulty: task.difficulty, planned_window: value as PlannedWindow };
+    
+    const key = actionKey(task.id, type === 'difficulty' ? 'set_difficulty' : 'set_planning');
+    setSavingActions((current) => ({ ...current, [key]: true }));
     setCardErrors((current) => ({ ...current, [task.id]: null }));
-    if (action.id === 'set_difficulty' || action.id === 'set_planning' || action.id === 'comment') {
+    try {
+      await client.updatePlanning(task.id, draft);
+      if (type === 'difficulty' && task.difficulty === 'unknown') spawnEmoji('🍔', syntheticEvent);
+      if (type === 'planning' && task.planned_window === 'unknown') spawnEmoji('🍔', syntheticEvent);
+      setStatusMessage(type === 'difficulty' ? successCopy('set_difficulty') : successCopy('set_planning'));
+      await loadAll();
+      if (expandedTaskId === task.id) void loadEvents(task.id);
+    } catch (error) {
+      setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
+    } finally {
+      setSavingActions((current) => ({ ...current, [key]: false }));
+    }
+  };
+
+  const saveStatusPopup = async (task: TaskSummary, status: string, e: React.MouseEvent) => {
+    const syntheticEvent = { clientX: e.clientX, clientY: e.clientY } as React.MouseEvent;
+    setActivePopup(null);
+    const key = actionKey(task.id, 'change_status');
+    setSavingActions((current) => ({ ...current, [key]: true }));
+    setCardErrors((current) => ({ ...current, [task.id]: null }));
+    try {
+      await client.updateStatus(task.id, status as TaskStatus);
+      if (status === 'started' && task.status === 'received') spawnEmoji('🍕', syntheticEvent);
+      else if (status === 'thinks_done' && task.status === 'started') spawnEmoji('🍕', syntheticEvent);
+      else if (status === 'confirmed_done' && task.status !== 'confirmed_done') spawnEmoji('⭐', syntheticEvent);
+      setStatusMessage(`Status ändrad till ${statusLabel[status]}`);
+      await loadAll();
+      if (expandedTaskId === task.id) void loadEvents(task.id);
+    } catch (error) {
+      setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
+    } finally {
+      setSavingActions((current) => ({ ...current, [key]: false }));
+    }
+  };
+
+  const runAction = async (task: TaskSummary, action: ActionDescriptor, e: React.MouseEvent) => {
+    setCardErrors((current) => ({ ...current, [task.id]: null }));
+    if (action.id === 'set_difficulty' || action.id === 'set_planning') {
+      setActivePopup({ taskId: task.id, type: action.id === 'set_difficulty' ? 'difficulty' : 'planning' });
+      return;
+    }
+    if (action.id === 'comment') {
       if (expandedTaskId !== task.id) {
-        setExpandedTaskId(task.id);
-        void loadComments(task.id);
+        toggleExpanded(task);
+      }
+      return;
+    }
+    if (action.id === 'collect_reward') {
+      const key = actionKey(task.id, action.id);
+      setSavingActions((current) => ({ ...current, [key]: true }));
+      try {
+        await client.collectReward(task.id);
+        spawnEmoji('⭐', e);
+        setStatusMessage('Du samlade dina stjärnor! Snyggt jobbat!');
+        await loadAll();
+        if (expandedTaskId === task.id) void loadEvents(task.id);
+      } catch (error) {
+        setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
+      } finally {
+        setSavingActions((current) => ({ ...current, [key]: false }));
       }
       return;
     }
@@ -207,26 +315,16 @@ export default function App() {
     setSavingActions((current) => ({ ...current, [key]: true }));
     try {
       const toStatus = nextStatusForAction(action.id);
-      if (toStatus) await client.updateStatus(task.id, toStatus);
+      if (toStatus) {
+        await client.updateStatus(task.id, toStatus);
+        if (toStatus === 'started' || toStatus === 'thinks_done' || toStatus === 'confirmed_done') {
+           spawnEmoji(toStatus === 'confirmed_done' ? '⭐' : '🍕', e);
+        }
+      }
       if (action.id === 'reject_done') await client.rejectTask(task.id, context);
       setStatusMessage(successCopy(action.id));
       await loadAll();
-    } catch (error) {
-      setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
-    } finally {
-      setSavingActions((current) => ({ ...current, [key]: false }));
-    }
-  };
-
-  const savePlanning = async (task: TaskSummary) => {
-    const draft = planningDrafts[task.id] ?? { difficulty: task.difficulty, planned_window: task.planned_window };
-    const key = actionKey(task.id, 'set_planning');
-    setSavingActions((current) => ({ ...current, [key]: true }));
-    setCardErrors((current) => ({ ...current, [task.id]: null }));
-    try {
-      await client.updatePlanning(task.id, draft);
-      setStatusMessage(draft.difficulty !== task.difficulty ? successCopy('set_difficulty') : successCopy('set_planning'));
-      await loadAll();
+      if (expandedTaskId === task.id) void loadEvents(task.id);
     } catch (error) {
       setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
     } finally {
@@ -238,13 +336,7 @@ export default function App() {
     event.preventDefault();
     const commentState = commentsByTask[taskId] ?? emptyCommentsState();
     const message = commentState.draft.trim();
-    if (!message) {
-      setCommentsByTask((current) => ({
-        ...current,
-        [taskId]: { ...(current[taskId] ?? emptyCommentsState()), inputError: 'Skriv något kort först.' },
-      }));
-      return;
-    }
+    if (!message) return;
 
     setCommentsByTask((current) => ({
       ...current,
@@ -259,18 +351,15 @@ export default function App() {
           items: [...(current[taskId]?.items ?? []), comment],
           draft: '',
           saving: false,
-          inputError: null,
-          error: null,
         },
       }));
-      setStatusMessage('Kommentaren skickades.');
     } catch (error) {
       setCommentsByTask((current) => ({
         ...current,
         [taskId]: {
           ...(current[taskId] ?? emptyCommentsState()),
           saving: false,
-          error: onlineErrorCopy(error, 'Det gick inte att spara just nu. Försök igen.'),
+          error: onlineErrorCopy(error, 'Det gick inte att spara just nu.'),
         },
       }));
     }
@@ -284,7 +373,10 @@ export default function App() {
       && typeof window.matchMedia === 'function'
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    setFeedback({ message: 'Nästan — kolla en gång till.', motion: !reducedMotion });
+    const taskForAnimation = state.tasks.find(t => t.id === next.task_id);
+    const titleText = taskForAnimation ? ` på ${taskForAnimation.title}` : '';
+    setFeedback({ message: `Nästan — kolla en gång till${titleText}.`, motion: !reducedMotion });
+
     const timeout = window.setTimeout(() => {
       void client
         .ackAnimation(context.childUserId, next.id)
@@ -311,7 +403,7 @@ export default function App() {
   return (
     <main className="appShell">
       <section className={`topPanel ${feedback?.motion ? 'topPanel--feedback' : ''}`} aria-label="Framsteg">
-        <div className="avatar" aria-hidden="true">{avatar}</div>
+        <div className="avatar" id="main-avatar" aria-hidden="true">{avatar}</div>
         <div className="topPanelText">
           <p className="eyebrow">SchoolTaskHelper</p>
           <h1>{state.progress?.nausea_score ? 'Behöver kollas igen' : hungerLabel(state.progress)}</h1>
@@ -372,152 +464,161 @@ export default function App() {
             const actions = getVisibleActions(task, context);
             const expanded = expandedTaskId === task.id;
             const commentsState = commentsByTask[task.id] ?? emptyCommentsState();
-            const planningDraft = planningDrafts[task.id] ?? { difficulty: task.difficulty, planned_window: task.planned_window };
-            const planningSaving = Boolean(savingActions[actionKey(task.id, 'set_planning')]);
-            const canPlan = context.role === 'child' && task.status !== 'thinks_done' && task.status !== 'confirmed_done';
+
+            const events = eventsByTask[task.id] || [];
+            const comments = commentsState.items || [];
+            const combinedTimeline = [
+              ...events.map(ev => ({ type: 'event' as const, data: ev, time: new Date(ev.created_at).getTime() })),
+              ...comments.map(c => ({ type: 'comment' as const, data: c, time: new Date(c.created_at).getTime() })),
+              { type: 'source' as const, data: { source: task.source }, time: new Date(task.created_at || 0).getTime() - 1 }
+            ].sort((a, b) => b.time - a.time);
 
             return (
               <article className="taskCard" key={task.id}>
                 <div className="taskCardHeader">
-                  <div>
+                  <div className="taskHeaderContent">
                     <h2>{task.title}</h2>
                     <p className="metaLine">
                       {task.subject || 'Ämne saknas'} · {task.due_date || 'Inget datum'}
                     </p>
+                    <p className="subMetaLine">
+                      Svårighet: <strong>{difficultyLabel[task.difficulty]}</strong> · Plan: <strong>{planningLabel[task.planned_window]}</strong> · Status: <strong>{statusLabel[task.status]}</strong>
+                    </p>
                   </div>
                   <button
-                    className="secondary expandButton"
+                    className="secondary expandButton iconButton"
                     type="button"
                     aria-expanded={expanded}
+                    aria-label={expanded ? 'Visa mindre' : 'Visa mer'}
                     onClick={() => toggleExpanded(task)}
                   >
-                    {expanded ? 'Visa mindre' : 'Visa mer'}
+                    {expanded ? '▲' : '▼'}
                   </button>
                 </div>
 
-                <div className="chips" aria-label="Uppgiftsstatus">
-                  <span>Svårighet: {difficultyLabel[task.difficulty]}</span>
-                  <span>Plan: {planningLabel[task.planned_window]}</span>
-                  <span>Status: {statusLabel[task.status]}</span>
-                </div>
-
-                {actions.length > 0 ? (
-                  <div className="actions" aria-label="Tillgängliga åtgärder">
-                    {actions.slice(0, expanded ? actions.length : 1).map((action) => {
-                      const saving = Boolean(savingActions[actionKey(task.id, action.id)]);
-                      return (
-                        <button
-                          className={action.kind}
-                          key={action.id}
-                          type="button"
-                          disabled={saving}
-                          onClick={() => void runAction(task, action)}
-                        >
-                          {saving ? buttonSavingLabel(action.id) : action.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="metaLine taskHelp">{taskHelpText(task, context.role)}</p>
-                )}
+                {(() => {
+                  const primaryActions = actions.filter(a => a.id !== 'comment' && a.id !== 'set_difficulty' && a.id !== 'set_planning');
+                  const mainAction = primaryActions.length > 0 ? primaryActions[0] : null;
+                  const actionsToRender = expanded ? primaryActions : (mainAction ? [mainAction] : []);
+                  
+                  return actionsToRender.length > 0 ? (
+                    <div className="actions" aria-label="Tillgängliga åtgärder">
+                      {actionsToRender.map((action) => {
+                        const saving = Boolean(savingActions[actionKey(task.id, action.id)]);
+                        return (
+                          <button
+                            className={action.kind}
+                            key={action.id}
+                            type="button"
+                            disabled={saving}
+                            onClick={(e) => void runAction(task, action, e)}
+                          >
+                            {saving ? buttonSavingLabel(action.id) : action.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="metaLine taskHelp">{taskHelpText(task, context.role)}</p>
+                  );
+                })()}
 
                 {cardErrors[task.id] ? <p className="errorText" role="alert">{cardErrors[task.id]}</p> : null}
 
+                {activePopup?.taskId === task.id ? (
+                  <div className="actionPopupBackdrop" onClick={() => setActivePopup(null)}>
+                    <div className="actionPopup" onClick={e => e.stopPropagation()}>
+                      <h3>{activePopup.type === 'difficulty' ? 'Hur svår känns den?' : activePopup.type === 'planning' ? 'När tänker du jobba med den?' : 'Ändra status'}</h3>
+                      <div className="popupButtons">
+                        {activePopup.type === 'difficulty' && (
+                          (['easy', 'medium', 'hard'] as Difficulty[]).map((value) => (
+                            <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'difficulty', value, e)}>
+                              {difficultyLabel[value]}
+                            </button>
+                          ))
+                        )}
+                        {activePopup.type === 'planning' && (
+                          (['today', 'tomorrow', 'this_week', 'next_week'] as PlannedWindow[]).map((value) => (
+                            <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'planning', value, e)}>
+                              {planningLabel[value]}
+                            </button>
+                          ))
+                        )}
+                        {activePopup.type === 'status' && (
+                          (['received', 'started', 'thinks_done', 'confirmed_done']).map((value) => (
+                            <button key={value} className="secondary" type="button" onClick={(e) => saveStatusPopup(task, value, e)}>
+                              {statusLabel[value]}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                      <button className="secondary popupClose" type="button" onClick={() => setActivePopup(null)}>Avbryt</button>
+                    </div>
+                  </div>
+                ) : null}
+
                 {expanded ? (
                   <div className="taskDetails">
-                    <p className="metaLine">Källa: {task.source ? sourceLabel[task.source] ?? task.source : 'Manuell'}</p>
+                    <div className="tinyActions">
+                      <button className="secondary tiny" type="button" onClick={() => setActivePopup({ taskId: task.id, type: 'difficulty' })}>Ändra svårighet</button>
+                      <button className="secondary tiny" type="button" onClick={() => setActivePopup({ taskId: task.id, type: 'planning' })}>Ändra plan</button>
+                      <button className="secondary tiny" type="button" onClick={() => setActivePopup({ taskId: task.id, type: 'status' })}>Ändra status</button>
+                    </div>
 
-                    {canPlan ? (
-                      <section className="detailBlock" aria-labelledby={`planera-${task.id}`}>
-                        <h3 id={`planera-${task.id}`}>Planera</h3>
-                        <fieldset>
-                          <legend>Hur svår känns den?</legend>
-                          <div className="optionGrid">
-                            {(['easy', 'medium', 'hard', 'unknown'] as Difficulty[]).map((value) => (
-                              <label key={value}>
-                                <input
-                                  type="radio"
-                                  name={`difficulty-${task.id}`}
-                                  value={value}
-                                  checked={planningDraft.difficulty === value}
-                                  onChange={() => setPlanningDrafts((current) => ({
-                                    ...current,
-                                    [task.id]: { ...planningDraft, difficulty: value },
-                                  }))}
-                                />
-                                {difficultyLabel[value]}
-                              </label>
-                            ))}
-                          </div>
-                        </fieldset>
-                        <fieldset>
-                          <legend>När tänker du jobba med den?</legend>
-                          <div className="optionGrid">
-                            {(['today', 'tomorrow', 'this_week', 'next_week', 'unknown'] as PlannedWindow[]).map((value) => (
-                              <label key={value}>
-                                <input
-                                  type="radio"
-                                  name={`planning-${task.id}`}
-                                  value={value}
-                                  checked={planningDraft.planned_window === value}
-                                  onChange={() => setPlanningDrafts((current) => ({
-                                    ...current,
-                                    [task.id]: { ...planningDraft, planned_window: value },
-                                  }))}
-                                />
-                                {planningLabel[value]}
-                              </label>
-                            ))}
-                          </div>
-                        </fieldset>
-                        <button className="primary" type="button" disabled={planningSaving} onClick={() => void savePlanning(task)}>
-                          {planningSaving ? 'Sparar…' : 'Spara plan'}
-                        </button>
-                      </section>
-                    ) : (
-                      <section className="detailBlock" aria-labelledby={`status-${task.id}`}>
-                        <h3 id={`status-${task.id}`}>Status</h3>
-                        <p>{taskHelpText(task, context.role)}</p>
-                      </section>
-                    )}
+                    <section className="detailBlock timelineBlock" aria-labelledby={`log-${task.id}`}>
+                      <h3 id={`log-${task.id}`}>Logg & Kommentarer</h3>
+                      
+                      {combinedTimeline.length > 0 ? (
+                        <ul className="historyLog">
+                          {combinedTimeline.map(item => {
+                            const dateStr = new Date(item.time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute:'2-digit', month: 'short', day: 'numeric' });
+                            
+                            if (item.type === 'source') {
+                              const sourceName = item.data.source ? sourceLabel[item.data.source] ?? item.data.source : 'Manuell';
+                              return <li key={`src-${task.id}`}><span className="logTime">{dateStr}</span> <span className="logMsg">Källa: {sourceName}</span></li>;
+                            } else if (item.type === 'event') {
+                              const ev = item.data as TaskEvent;
+                              let msg = ev.event_type;
+                              if (ev.event_type === 'status_changed') {
+                                const payload = parseEventPayload(ev.payload_json);
+                                const toStatus = String(payload.to_status || '');
+                                msg = `Status ändrad till ${statusLabel[toStatus] || toStatus || 'okänd status'}`;
+                              } else if (ev.event_type === 'planning_updated') {
+                                const payload = parseEventPayload(ev.payload_json);
+                                const difficultyValue = (payload.difficulty as { to?: Difficulty } | undefined)?.to;
+                                const plannedWindowValue = (payload.planned_window as { to?: PlannedWindow } | undefined)?.to;
+                                if (difficultyValue) msg = `Svårighet satt till ${difficultyLabel[difficultyValue]}`;
+                                else if (plannedWindowValue) msg = `Plan satt till ${planningLabel[plannedWindowValue]}`;
+                              } else if (ev.event_type === 'task_created') msg = 'Uppgift skapad';
+                              else return null;
+                              
+                              return <li key={`ev-${ev.id}`}><span className="logTime">{dateStr}</span> <span className="logMsg">{msg}</span></li>;
+                            } else {
+                              const c = item.data as TaskComment;
+                              const author = c.author_role === 'child' ? 'Barn' : 'Vuxen';
+                              return (
+                                <li key={`c-${c.id}`}>
+                                  <span className="logTime">{dateStr}</span> 
+                                  <span className="logMsg"><strong>{author}:</strong> {c.message}</span>
+                                </li>
+                              );
+                            }
+                          })}
+                        </ul>
+                      ) : <p className="metaLine">Laddar historik...</p>}
 
-                    <section className="detailBlock" aria-labelledby={`comments-${task.id}`}>
-                      <h3 id={`comments-${task.id}`}>Kommentarer</h3>
-                      {commentsState.loading ? <p>Hämtar kommentarer…</p> : null}
-                      {commentsState.error ? (
-                        <div className="inlineState" role="alert">
-                          <p>{commentsState.error}</p>
-                          <button className="secondary" type="button" onClick={() => void loadComments(task.id, true)}>Försök igen</button>
-                        </div>
-                      ) : null}
-                      {!commentsState.loading && !commentsState.error && commentsState.items.length === 0 ? <p>Inga kommentarer än.</p> : null}
-                      {commentsState.items.length > 0 ? (
-                        <ol className="commentsList">
-                          {commentsState.items.map((comment) => (
-                            <li key={comment.id}>
-                              <strong>{comment.author_role === 'child' ? 'Barn' : 'Vuxen'}</strong>
-                              <p>{comment.message}</p>
-                            </li>
-                          ))}
-                        </ol>
-                      ) : null}
-                      <form className="commentForm" onSubmit={(event) => void submitComment(event, task.id)}>
-                        <label htmlFor={`comment-${task.id}`}>Kommentera</label>
-                        <textarea
-                          id={`comment-${task.id}`}
-                          placeholder="Skriv en kort kommentar…"
+                      <form className="compactCommentForm" onSubmit={(event) => void submitComment(event, task.id)}>
+                        <input
+                          type="text"
+                          placeholder="Skriv en snabb kommentar…"
                           value={commentsState.draft}
-                          aria-describedby={commentsState.inputError ? `comment-error-${task.id}` : undefined}
                           onChange={(event) => setCommentsByTask((current) => ({
                             ...current,
                             [task.id]: { ...(current[task.id] ?? emptyCommentsState()), draft: event.target.value, inputError: null },
                           }))}
                         />
-                        <p className="metaLine">Skriv några ord först, så aktiveras Skicka.</p>
-                        {commentsState.inputError ? <p id={`comment-error-${task.id}`} className="errorText">{commentsState.inputError}</p> : null}
                         <button className="secondary" type="submit" disabled={commentsState.saving || !commentsState.draft.trim()}>
-                          {commentsState.saving ? 'Skickar…' : 'Skicka'}
+                          ➤
                         </button>
                       </form>
                     </section>
@@ -528,6 +629,13 @@ export default function App() {
           })}
         </section>
       )}
+
+      {/* Flygande emojis för gamification */}
+      {flyingEmojis.map(emoji => (
+        <div key={emoji.id} className="flyingFood" style={{ left: emoji.x, top: emoji.y }}>
+          {emoji.emoji}
+        </div>
+      ))}
     </main>
   );
 }

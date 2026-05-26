@@ -12,7 +12,7 @@
     "seed:dev": "node scripts/seed_dev_data.js",
     "build:web": "vite build",
     "typecheck:web": "tsc -b tsconfig.json",
-    "test:web": "tsc -p apps/web/tsconfig.node-test.json && node --test \"$PWD/node_modules/.tmp/web-tests/api/apiClient.test.js\"",
+    "test:web": "tsc -p apps/web/tsconfig.node-test.json && node -e \"const { spawnSync } = require('child_process'); const p = require('path').resolve('node_modules/.tmp/web-tests/api/apiClient.test.js'); process.exit(spawnSync('node', ['--test', p], { stdio: 'inherit' }).status);\"",
     "test": "node --test tests/integration.test.js"
   },
   "repository": {

@@ -9,6 +9,7 @@ export type TaskActionId =
   | 'mark_thinks_done'
   | 'confirm_done'
   | 'reject_done'
+  | 'collect_reward'
   | 'comment';
 export { buildViewHref } from './viewContext';
 
@@ -29,6 +30,8 @@ export interface TaskSummary {
   difficulty: Difficulty;
   planned_window: PlannedWindow;
   status: TaskStatus;
+  current_attempt_no?: number;
+  reward_collected_at?: string | null;
   can_actions: TaskActionId[];
   created_at?: string;
   updated_at?: string;
@@ -47,6 +50,16 @@ export interface TaskComment {
   created_at: string;
   updated_at?: string | null;
   deleted_at?: string | null;
+}
+
+export interface TaskEvent {
+  id: string;
+  task_id: string;
+  event_type: string;
+  actor_type: Role | 'system';
+  actor_ref: string;
+  created_at: string;
+  payload_json: string;
 }
 
 export interface ChildProgress {
@@ -79,17 +92,18 @@ export interface ActionDescriptor {
 }
 
 const actionLabels: Record<TaskActionId, string> = {
-  set_difficulty: 'Välj svårighet',
-  set_planning: 'Planera tid',
+  set_difficulty: 'Svårighetsgrad',
+  set_planning: 'Planera',
   mark_started: 'Jag har börjat',
   mark_thinks_done: 'Jag tror jag är klar',
-  confirm_done: 'Bekräfta klar',
-  reject_done: 'Kolla igen',
+  confirm_done: 'Godkänn som klar',
+  reject_done: 'Behöver kollas igen',
+  collect_reward: 'Fira ⭐',
   comment: 'Kommentera',
 };
 
 const roleAllowedActions: Record<Role, TaskActionId[]> = {
-  child: ['set_difficulty', 'set_planning', 'mark_started', 'mark_thinks_done', 'comment'],
+  child: ['set_difficulty', 'set_planning', 'mark_started', 'mark_thinks_done', 'comment', 'collect_reward'],
   parent: ['confirm_done', 'reject_done', 'comment'],
   agent: ['confirm_done', 'reject_done', 'comment'],
 };
@@ -99,7 +113,7 @@ const statusAllowedActions: Record<Role, Record<TaskStatus, TaskActionId[]>> = {
     received: ['set_difficulty', 'set_planning', 'mark_started', 'comment'],
     started: ['set_difficulty', 'set_planning', 'mark_thinks_done', 'comment'],
     thinks_done: ['comment'],
-    confirmed_done: [],
+    confirmed_done: ['collect_reward', 'comment'],
   },
   parent: {
     received: ['comment'],
@@ -118,6 +132,7 @@ const statusAllowedActions: Record<Role, Record<TaskStatus, TaskActionId[]>> = {
 const displayPriority: TaskActionId[] = [
   'confirm_done',
   'reject_done',
+  'collect_reward',
   'set_difficulty',
   'set_planning',
   'mark_started',
@@ -167,7 +182,14 @@ export class SchoolTaskApiClient {
   constructor({ baseUrl = '', context, fetchImpl = fetch }: ApiClientOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.context = context;
-    this.fetchImpl = fetchImpl;
+    
+    let boundFetch = fetchImpl;
+    if (typeof window !== 'undefined' && fetchImpl === window.fetch) {
+      boundFetch = fetchImpl.bind(window);
+    } else if (typeof globalThis !== 'undefined' && fetchImpl === globalThis.fetch) {
+      boundFetch = fetchImpl.bind(globalThis);
+    }
+    this.fetchImpl = boundFetch;
   }
 
   withContext(context: LocalViewContext): SchoolTaskApiClient {
@@ -184,6 +206,10 @@ export class SchoolTaskApiClient {
 
   listComments(taskId: string): Promise<TaskComment[]> {
     return this.request(`/tasks/${encodeURIComponent(taskId)}/comments`);
+  }
+
+  listEvents(taskId: string): Promise<TaskEvent[]> {
+    return this.request(`/tasks/${encodeURIComponent(taskId)}/events`);
   }
 
   createComment(taskId: string, message: string, context = this.requireContext()): Promise<TaskComment> {
@@ -220,6 +246,13 @@ export class SchoolTaskApiClient {
       method: 'POST',
       roleContext: context,
       body: { reason: reason?.trim() || undefined, reopen_to_status: 'started' },
+    });
+  }
+
+  collectReward(taskId: string, context = this.requireContext()): Promise<TaskSummary> {
+    return this.request(`/tasks/${encodeURIComponent(taskId)}/collect_reward`, {
+      method: 'POST',
+      roleContext: context,
     });
   }
 

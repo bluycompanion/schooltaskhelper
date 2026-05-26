@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   source TEXT NOT NULL,
   source_external_id TEXT NOT NULL,
   current_attempt_no INTEGER NOT NULL DEFAULT 0,
+  reward_collected_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (source, source_external_id)
@@ -83,3 +84,4 @@ CREATE TABLE IF NOT EXISTS child_progress_state (
   nausea_updated_at TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ 
