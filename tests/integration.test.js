@@ -4,7 +4,7 @@ const request = require('supertest');
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
-const { createApp } = require('../src/app');
+const { createApp, derivePlannedDate } = require('../src/app');
 const { runMigrations } = require('../src/db');
 const { DEMO_CHILD_USER_ID, DEMO_PARENT_USER_ID, seedDevData } = require('../scripts/seed_dev_data');
 
@@ -21,7 +21,7 @@ function setup() {
 
 test('seedDevData resets predictable local GUI verification data', async () => {
   const { app, db } = setup();
-  await request(app).post('/agent/tasks').send({ child_user_id: DEMO_CHILD_USER_ID, title: 'Old manual task', source: 'manual', source_external_id: 'old-manual' });
+  await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: DEMO_CHILD_USER_ID, title: 'Old manual task', source: 'manual', source_external_id: 'old-manual' });
 
   seedDevData(db);
   let list = await request(app).get(`/tasks?child_user_id=${DEMO_CHILD_USER_ID}`);
@@ -54,7 +54,7 @@ test('seedDevData resets predictable local GUI verification data', async () => {
 
 test('hunger +3 on new task and -1 progression capped at 3', async () => {
   const { app } = setup();
-  const create = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'T1', source: 'manual', source_external_id: 'a1' });
+  const create = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'T1', source: 'manual', source_external_id: 'a1' });
   assert.equal(create.status, 201);
   const taskId = create.body.id;
 
@@ -75,9 +75,82 @@ test('hunger +3 on new task and -1 progression capped at 3', async () => {
   assert.equal(p.body.hunger_score, 0);
 });
 
+test('derivePlannedDate maps planning windows to future-or-today local dates', () => {
+  const wed = new Date(2026, 4, 26, 12, 0, 0);
+  assert.equal(derivePlannedDate('today', wed), '2026-05-26');
+  assert.equal(derivePlannedDate('tomorrow', wed), '2026-05-27');
+  assert.equal(derivePlannedDate('this_week', wed), '2026-05-29');
+  assert.equal(derivePlannedDate('next_week', wed), '2026-06-01');
+
+  const saturday = new Date(2026, 4, 30, 12, 0, 0);
+  assert.equal(derivePlannedDate('this_week', saturday), '2026-06-05');
+
+  const sunday = new Date(2026, 4, 31, 12, 0, 0);
+  assert.equal(derivePlannedDate('next_week', sunday), '2026-06-01');
+  assert.equal(derivePlannedDate('unknown', sunday), null);
+});
+
+test('planning endpoint persists planned_date and exposes it in task and agent reads', async () => {
+  const { app } = setup();
+  const create = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({
+    child_user_id: 'child1',
+    title: 'Planning date task',
+    source: 'manual',
+    source_external_id: 'planned-date-1',
+    due_date: '2026-06-03',
+  });
+  assert.equal(create.status, 201);
+  assert.equal(create.body.planned_date, null);
+
+  const expected = derivePlannedDate('this_week');
+  const patch = await request(app).patch(`/tasks/${create.body.id}/planning`).set('x-role', 'child').set('x-user-id', 'child1').send({
+    difficulty: 'medium',
+    planned_window: 'this_week',
+  });
+  assert.equal(patch.status, 200);
+  assert.equal(patch.body.planned_window, 'this_week');
+  assert.equal(patch.body.planned_date, expected);
+
+  const detail = await request(app).get(`/tasks/${create.body.id}`);
+  assert.equal(detail.body.planned_date, expected);
+
+  const list = await request(app).get('/tasks?child_user_id=child1');
+  assert.equal(list.body.find((task) => task.id === create.body.id).planned_date, expected);
+
+  const agentTasks = await request(app)
+    .get('/agent/tasks?child_user_id=child1&due_from=2026-05-01&due_to=2026-06-30')
+    .set('x-role', 'agent');
+  assert.equal(agentTasks.status, 200);
+  assert.equal(agentTasks.body.find((task) => task.id === create.body.id).planned_date, expected);
+
+  const events = await request(app).get(`/tasks/${create.body.id}/events`);
+  const planningEvent = events.body.find((event) => event.event_type === 'planning_updated');
+  const payload = JSON.parse(planningEvent.payload_json);
+  assert.deepEqual(payload.planned_window, { from: 'unknown', to: 'this_week' });
+  assert.deepEqual(payload.planned_date, { from: null, to: expected });
+
+  const clear = await request(app).patch(`/tasks/${create.body.id}/planning`).set('x-role', 'child').send({ planned_window: 'unknown' });
+  assert.equal(clear.status, 200);
+  assert.equal(clear.body.planned_window, 'unknown');
+  assert.equal(clear.body.planned_date, null);
+});
+
+test('planning endpoint rejects invalid enum values before database constraints', async () => {
+  const { app } = setup();
+  const create = await request(app).post('/agent/tasks').set('x-role', 'agent').send({ child_user_id: 'child1', title: 'Invalid enums', source: 'manual', source_external_id: 'invalid-enums' });
+
+  const badWindow = await request(app).patch(`/tasks/${create.body.id}/planning`).set('x-role', 'child').send({ planned_window: 'someday' });
+  assert.equal(badWindow.status, 400);
+  assert.deepEqual(badWindow.body, { error: 'invalid planned_window' });
+
+  const badDifficulty = await request(app).patch(`/tasks/${create.body.id}/planning`).set('x-role', 'child').send({ difficulty: 'huge' });
+  assert.equal(badDifficulty.status, 400);
+  assert.deepEqual(badDifficulty.body, { error: 'invalid difficulty' });
+});
+
 test('stars/xp by difficulty + nausea + one-shot animation ack', async () => {
   const { app, db } = setup();
-  const create = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'T2', source: 'manual', source_external_id: 'a2' });
+  const create = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'T2', source: 'manual', source_external_id: 'a2' });
   const taskId = create.body.id;
 
   await request(app).patch(`/tasks/${taskId}/planning`).set('x-role', 'child').send({ difficulty: 'hard', planned_window: 'today' });
@@ -124,7 +197,7 @@ test('stars/xp by difficulty + nausea + one-shot animation ack', async () => {
 
 test('lists active tasks by due date with can_actions and task details', async () => {
   const { app } = setup();
-  const late = await request(app).post('/agent/tasks').send({
+  const late = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({
     child_user_id: 'child1',
     title: 'Late task',
     source: 'manual',
@@ -132,7 +205,7 @@ test('lists active tasks by due date with can_actions and task details', async (
     subject: 'Math',
     due_date: '2026-06-03'
   });
-  const early = await request(app).post('/agent/tasks').send({
+  const early = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({
     child_user_id: 'child1',
     title: 'Early task',
     source: 'manual',
@@ -165,7 +238,7 @@ test('lists active tasks by due date with can_actions and task details', async (
 
 test('role headers are enforced on mutating child, parent, and comment endpoints', async () => {
   const { app } = setup();
-  const create = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Role task', source: 'manual', source_external_id: 'role1' });
+  const create = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'Role task', source: 'manual', source_external_id: 'role1' });
   const taskId = create.body.id;
 
   const parentPlanning = await request(app).patch(`/tasks/${taskId}/planning`).set('x-role', 'parent').send({ difficulty: 'easy', planned_window: 'today' });
@@ -195,10 +268,10 @@ test('role headers are enforced on mutating child, parent, and comment endpoints
 
 test('can_actions are status-based UI hints and active list excludes confirmed_done', async () => {
   const { app } = setup();
-  const received = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Received', source: 'manual', source_external_id: 'hint-received', due_date: '2026-06-01' });
-  const started = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Started', source: 'manual', source_external_id: 'hint-started', due_date: '2026-06-02' });
-  const review = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Review', source: 'manual', source_external_id: 'hint-review', due_date: '2026-06-03' });
-  const done = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'Done', source: 'manual', source_external_id: 'hint-done', due_date: '2026-06-04' });
+  const received = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'Received', source: 'manual', source_external_id: 'hint-received', due_date: '2026-06-01' });
+  const started = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'Started', source: 'manual', source_external_id: 'hint-started', due_date: '2026-06-02' });
+  const review = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'Review', source: 'manual', source_external_id: 'hint-review', due_date: '2026-06-03' });
+  const done = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'Done', source: 'manual', source_external_id: 'hint-done', due_date: '2026-06-04' });
 
   await request(app).patch(`/tasks/${started.body.id}/status`).set('x-role', 'child').send({ to_status: 'started' });
   await request(app).patch(`/tasks/${review.body.id}/status`).set('x-role', 'child').send({ to_status: 'started' });
@@ -224,7 +297,7 @@ test('can_actions are status-based UI hints and active list excludes confirmed_d
 
 test('events endpoint records task lifecycle, rewards, feedback delivery, and ack events', async () => {
   const { app } = setup();
-  const create = await request(app).post('/agent/tasks').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'Event task', source: 'manual', source_external_id: 'event1' });
+  const create = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'Event task', source: 'manual', source_external_id: 'event1' });
   const taskId = create.body.id;
 
   let events = await request(app).get(`/tasks/${taskId}/events`);
@@ -283,9 +356,23 @@ test('events endpoint records task lifecycle, rewards, feedback delivery, and ac
   assert.equal(typeof JSON.parse(commentEvent.payload_json).comment_id, 'string');
 });
 
-test('runMigrations adds delivered_at to existing local task_feedback_animations tables non-destructively', () => {
+test('runMigrations adds additive local columns non-destructively', () => {
   const db = new Database(':memory:');
   db.exec(`
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      child_user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      planned_window TEXT NOT NULL DEFAULT 'unknown',
+      source TEXT NOT NULL,
+      source_external_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (source, source_external_id)
+    );
+    INSERT INTO tasks (id, child_user_id, title, planned_window, source, source_external_id)
+    VALUES ('task1', 'child1', 'Task 1', 'today', 'manual', 'legacy-task-1');
+
     CREATE TABLE task_feedback_animations (
       id TEXT PRIMARY KEY,
       task_id TEXT NOT NULL,
@@ -307,11 +394,17 @@ test('runMigrations adds delivered_at to existing local task_feedback_animations
   assert.equal(columns.includes('seen_at'), true);
   const row = db.prepare('SELECT id, animation_key, delivered_at, seen_at FROM task_feedback_animations WHERE id=?').get('anim1');
   assert.deepEqual(row, { id: 'anim1', animation_key: 'key1', delivered_at: null, seen_at: null });
+
+  const taskColumns = db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name);
+  assert.equal(taskColumns.includes('planned_date'), true);
+  assert.equal(taskColumns.includes('reward_collected_at'), true);
+  const task = db.prepare('SELECT id, planned_window, planned_date, reward_collected_at FROM tasks WHERE id=?').get('task1');
+  assert.deepEqual(task, { id: 'task1', planned_window: 'today', planned_date: null, reward_collected_at: null });
 });
 
 test('creates and reads task comment thread', async () => {
   const { app } = setup();
-  const create = await request(app).post('/agent/tasks').send({ child_user_id: 'child1', title: 'T3', source: 'manual', source_external_id: 'a3' });
+  const create = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'T3', source: 'manual', source_external_id: 'a3' });
   const taskId = create.body.id;
 
   const missingRole = await request(app).post(`/tasks/${taskId}/comments`).send({ message: 'No role' });
@@ -329,4 +422,131 @@ test('creates and reads task comment thread', async () => {
   assert.equal(thread.status, 200);
   assert.deepEqual(thread.body.map(c => c.message), ['Jag börjar idag.', 'Bra, jag kollar sen.']);
   assert.deepEqual(thread.body.map(c => c.author_role), ['child', 'parent']);
+});
+
+test('agent endpoints list due-window tasks and answer child questions', async () => {
+  const { app } = setup();
+  const outsideWindow = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'hermes1').set('x-agent-provider', 'hermes').send({
+    child_user_id: 'child1',
+    title: 'Outside window',
+    source: 'manual',
+    source_external_id: 'agent-outside',
+    due_date: '2025-05-01',
+  });
+  const inWindow = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'openclaw1').set('x-agent-provider', 'openclaw').send({
+    child_user_id: 'child1',
+    title: 'In window',
+    source: 'manual',
+    source_external_id: 'agent-inside',
+    due_date: '2026-05-30',
+  });
+
+  await request(app).post(`/tasks/${outsideWindow.body.id}/comments`).set('x-role', 'child').set('x-user-id', 'child1').send({ message: 'Fråga från ett annat datum?' });
+  const questionCreate = await request(app).post(`/tasks/${inWindow.body.id}/comments`).set('x-role', 'child').set('x-user-id', 'child1').send({ message: 'Kan du hjälpa mig med den här?' });
+  assert.equal(questionCreate.status, 201);
+  await request(app).post(`/tasks/${inWindow.body.id}/comments`).set('x-role', 'parent').set('x-user-id', 'parent1').send({ message: 'Jag svarar senare.' });
+
+  const agentTasks = await request(app)
+    .get('/agent/tasks?child_user_id=child1&due_from=2026-05-01&due_to=2026-06-30')
+    .set('x-role', 'agent')
+    .set('x-user-id', 'hermes1')
+    .set('x-agent-provider', 'hermes');
+  assert.equal(agentTasks.status, 200);
+  assert.deepEqual(agentTasks.body.map((task) => task.title), ['In window']);
+
+  const listAll = await request(app)
+    .get('/agent/tasks?child_user_id=child1&due_from=2026-05-01&due_to=2026-06-30')
+    .set('x-role', 'agent')
+    .set('x-user-id', 'openclaw1')
+    .set('x-agent-provider', 'openclaw');
+  assert.equal(listAll.status, 200);
+  assert.ok(listAll.body.some((task) => task.title === 'In window'));
+  assert.ok(!listAll.body.some((task) => task.title === 'Outside window'));
+
+  const questions = await request(app)
+    .get('/agent/questions?child_user_id=child1')
+    .set('x-role', 'agent')
+    .set('x-user-id', 'hermes1')
+    .set('x-agent-provider', 'hermes');
+  assert.equal(questions.status, 200);
+  assert.equal(questions.body.length, 2);
+  assert.deepEqual(
+    questions.body.map((question) => [question.task_title, question.answered]).sort((a, b) => a[0].localeCompare(b[0])),
+    [
+      ['In window', true],
+      ['Outside window', false],
+    ],
+  );
+
+  const targetQuestion = questions.body.find((question) => question.task_title === 'In window');
+  const reply = await request(app)
+    .post(`/agent/questions/${targetQuestion.id}/reply`)
+    .set('x-role', 'agent')
+    .set('x-user-id', 'openclaw1')
+    .set('x-agent-provider', 'openclaw')
+    .send({ message: 'Ja, börja med punkt 1.' });
+  assert.equal(reply.status, 201);
+  assert.equal(reply.body.author_role, 'agent');
+  assert.equal(reply.body.message, 'Ja, börja med punkt 1.');
+
+  const questionsAfter = await request(app)
+    .get('/agent/questions?child_user_id=child1')
+    .set('x-role', 'agent')
+    .set('x-user-id', 'hermes1')
+    .set('x-agent-provider', 'hermes');
+  assert.equal(questionsAfter.body.length, 2);
+  assert.deepEqual(
+    questionsAfter.body.map((question) => [question.task_title, question.answered]).sort((a, b) => a[0].localeCompare(b[0])),
+    [
+      ['In window', true],
+      ['Outside window', false],
+    ],
+  );
+
+  const thread = await request(app).get(`/tasks/${inWindow.body.id}/comments`);
+  assert.deepEqual(thread.body.map((comment) => comment.message), [
+    'Kan du hjälpa mig med den här?',
+    'Jag svarar senare.',
+    'Ja, börja med punkt 1.',
+  ]);
+
+  const status = await request(app)
+    .patch(`/tasks/${inWindow.body.id}/status`)
+    .set('x-role', 'agent')
+    .set('x-user-id', 'hermes1')
+    .set('x-agent-provider', 'hermes')
+    .send({ to_status: 'started' });
+  assert.equal(status.status, 200);
+
+  const statusToReview = await request(app)
+    .patch(`/tasks/${inWindow.body.id}/status`)
+    .set('x-role', 'agent')
+    .set('x-user-id', 'hermes1')
+    .set('x-agent-provider', 'hermes')
+    .send({ to_status: 'thinks_done' });
+  assert.equal(statusToReview.status, 200);
+
+  const blockedPlanning = await request(app)
+    .patch(`/tasks/${inWindow.body.id}/planning`)
+    .set('x-role', 'agent')
+    .set('x-user-id', 'hermes1')
+    .set('x-agent-provider', 'hermes')
+    .send({ difficulty: 'hard', planned_window: 'today' });
+  assert.equal(blockedPlanning.status, 403);
+
+  const events = await request(app).get(`/tasks/${inWindow.body.id}/events`);
+  const payloadsByType = events.body.reduce((acc, event) => {
+    acc[event.event_type] = acc[event.event_type] || [];
+    acc[event.event_type].push(JSON.parse(event.payload_json));
+    return acc;
+  }, {});
+  assert.equal(payloadsByType.task_created[0].agent_provider, 'openclaw');
+  assert.equal(payloadsByType.comment_created.find((payload) => payload.reply_to_comment_id).agent_provider, 'openclaw');
+  assert.deepEqual(
+    payloadsByType.status_changed.map((payload) => [payload.agent_provider, payload.from_status, payload.to_status]),
+    [
+      ['hermes', 'received', 'started'],
+      ['hermes', 'started', 'thinks_done'],
+    ],
+  );
 });

@@ -52,6 +52,13 @@ export interface TaskComment {
   deleted_at?: string | null;
 }
 
+export interface AgentQuestion extends TaskComment {
+  task_title: string;
+  task_status: TaskStatus;
+  answered: boolean;
+  is_question: boolean;
+}
+
 export interface TaskEvent {
   id: string;
   task_id: string;
@@ -221,6 +228,49 @@ export class SchoolTaskApiClient {
     });
   }
 
+  createAgentTask(
+    body: { child_user_id: string; title: string; source: string; source_external_id: string; subject?: string | null; due_date?: string | null },
+    context = this.requireContext(),
+  ): Promise<TaskSummary> {
+    return this.request('/agent/tasks', {
+      method: 'POST',
+      roleContext: context,
+      includeUserId: true,
+      body,
+    });
+  }
+
+  listAgentTasks(
+    query: { childUserId?: string; dueFrom?: string; dueTo?: string } = {},
+    context = this.requireContext(),
+  ): Promise<TaskSummary[]> {
+    const params = new URLSearchParams();
+    if (query.childUserId) params.set('child_user_id', query.childUserId);
+    if (query.dueFrom) params.set('due_from', query.dueFrom);
+    if (query.dueTo) params.set('due_to', query.dueTo);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/agent/tasks${suffix}`, { roleContext: context });
+  }
+
+  listAgentQuestions(
+    query: { childUserId?: string } = {},
+    context = this.requireContext(),
+  ): Promise<AgentQuestion[]> {
+    const params = new URLSearchParams();
+    if (query.childUserId) params.set('child_user_id', query.childUserId);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/agent/questions${suffix}`, { roleContext: context });
+  }
+
+  replyToAgentQuestion(commentId: string, message: string, context = this.requireContext()): Promise<TaskComment> {
+    return this.request(`/agent/questions/${encodeURIComponent(commentId)}/reply`, {
+      method: 'POST',
+      roleContext: context,
+      includeUserId: true,
+      body: { message },
+    });
+  }
+
   updatePlanning(
     taskId: string,
     body: { difficulty: Difficulty; planned_window: PlannedWindow },
@@ -290,6 +340,7 @@ export class SchoolTaskApiClient {
         headers.set('x-user-id', options.roleContext.userId);
       }
     }
+    if (options.agentProvider) headers.set('x-agent-provider', options.agentProvider);
 
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: options.method ?? 'GET',
@@ -310,6 +361,7 @@ interface RequestOptions {
   headers?: HeadersInit;
   roleContext?: LocalViewContext;
   includeUserId?: boolean;
+  agentProvider?: string;
   body?: unknown;
 }
 

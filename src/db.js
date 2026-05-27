@@ -28,6 +28,7 @@ function runMigrations(db) {
 
   const tasksTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'").get();
   if (tasksTable) {
+    ensureColumn(db, 'tasks', 'planned_date', 'TEXT');
     ensureColumn(db, 'tasks', 'reward_collected_at', 'TEXT');
   }
 }

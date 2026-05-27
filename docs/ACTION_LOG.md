@@ -75,6 +75,10 @@
 - Utökade backend/frontend-tester för dev seed-reset och querystring-baserad rollvy.
 - Lade till deploy-stöd för webhosting subpath: root `server.js`, `/health`, statisk build från `dist/web`, och Vite `base` via `VITE_BASE_PATH` så appen kan köras bakom `/dev/schooltaskhelper/`.
 - Körde dev-deploy lokalt på `PORT=4321` med seedad demo-data, rebuilt `better-sqlite3` för aktuell Node, och la in live Caddy-route för `/dev/schooltaskhelper` via admin-API.
-
-- 2026-05-26: Genomf�rde en ultraminimalistisk uppdatering av gr�nssnittet. Ersatte stora etiketter med liten text, kombinerade kommentarer och historik till en kompakt, omv�nd tidslinje, lade till sm� knappar f�r att �ndra status/plan/sv�righet manuellt fr�n expanderad vy, samt flyttade k�llinformation in i loggen.
-- 2026-05-26: Hardade frontendens tidslinje-rendering mot trasiga event-payloads (safe JSON-parse med fallback) och rattade saving-state key for popup-val av svarighet/planering sa ratt action lases under sparning.
+- 2026-05-26: Genomförde en ultraminimalistisk uppdatering av gränssnittet. Ersatte stora etiketter med liten text, kombinerade kommentarer och historik till en kompakt, omvänd tidslinje, lade till små knappar för att ändra status/plan/svårighet manuellt från expanderad vy, samt flyttade källinformation in i loggen.
+- 2026-05-26: Hårdade frontendens tidslinje-rendering mot trasiga event-payloads (safe JSON-parse med fallback) och rattade saving-state key för popup-val av svårighet/planering så rätt action läses under sparning.
+- Skapade `docs/FUTURE_ACTION_TRACKER.md` med noteringar från senaste reviewen och ett API-fokuserat planutkast för agentstödet.
+- Deployade senaste `origin/main` i dev, seedade demo-data och bekräftade att backend svarar på `/health`.
+- Lade till agent-API för testning från andra platser/andra agenter: `/agent/tasks`, `/agent/questions` och `/agent/questions/:commentId/reply`; agent-anrop använder `x-role: agent` och kan bära `x-agent-provider` för Hermes/OpenClaw-spårning.
+- Verifierade lokalt att nya agent-endpoints fungerar mot dev-servern och seedade om demo-data efter smoke-test.
+- Rättade agent-API-kontraktet så status-only agentövergångar är dokumenterade, `reward_available`/`collect_reward`-semantiken syns i API-kontraktet och `x-agent-provider` sparas i eventpayloads för muterande agentanrop.

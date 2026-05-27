@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const { openDb, runMigrations } = require('../src/db');
+const { derivePlannedDate } = require('../src/app');
 
 const DEMO_CHILD_USER_ID = 'child1';
 const DEMO_PARENT_USER_ID = 'parent1';
@@ -97,8 +98,8 @@ function seedDevData(db) {
 
     for (const task of rows) {
       db.prepare(`INSERT INTO tasks
-        (id, child_user_id, title, subject, due_date, difficulty, planned_window, status, source, source_external_id, current_attempt_no, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        (id, child_user_id, title, subject, due_date, difficulty, planned_window, planned_date, status, source, source_external_id, current_attempt_no, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           task.id,
           DEMO_CHILD_USER_ID,
@@ -107,6 +108,7 @@ function seedDevData(db) {
           task.due_date,
           task.difficulty,
           task.planned_window,
+          derivePlannedDate(task.planned_window),
           task.status,
           DEMO_TASK_SOURCE,
           task.source_external_id,

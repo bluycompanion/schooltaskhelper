@@ -4,6 +4,44 @@ const crypto = require('crypto');
 function nowIso() { return new Date().toISOString(); }
 function id() { return crypto.randomUUID(); }
 
+const VALID_DIFFICULTIES = new Set(['easy', 'medium', 'hard', 'unknown']);
+const VALID_PLANNED_WINDOWS = new Set(['today', 'tomorrow', 'this_week', 'next_week', 'unknown']);
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addLocalDays(date, days) {
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function derivePlannedDate(plannedWindow, baseDate = new Date()) {
+  if (plannedWindow === 'unknown' || plannedWindow == null) return null;
+  if (!VALID_PLANNED_WINDOWS.has(plannedWindow)) return null;
+
+  const today = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+  if (plannedWindow === 'today') return formatLocalDate(today);
+  if (plannedWindow === 'tomorrow') return formatLocalDate(addLocalDays(today, 1));
+
+  const dayOfWeek = today.getDay();
+  if (plannedWindow === 'this_week') {
+    const daysUntilFriday = (5 - dayOfWeek + 7) % 7;
+    return formatLocalDate(addLocalDays(today, daysUntilFriday));
+  }
+
+  if (plannedWindow === 'next_week') {
+    const daysUntilNextMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
+    return formatLocalDate(addLocalDays(today, daysUntilNextMonday));
+  }
+
+  return null;
+}
+
 function starPoints(difficulty) {
   if (difficulty === 'easy') return 3;
   if (difficulty === 'hard') return 10;
@@ -23,6 +61,47 @@ function canActions(task) {
 
 function withCanActions(task) {
   return task ? { ...task, can_actions: canActions(task) } : task;
+}
+
+function eventPayload(req, payload = {}) {
+  const agentProvider = req.headers['x-agent-provider'];
+  if (!agentProvider) return payload;
+  return { ...payload, agent_provider: String(agentProvider) };
+}
+
+function isQuestionComment(message) {
+  const text = (message || '').trim().toLowerCase();
+  if (!text) return false;
+  if (text.includes('?')) return true;
+  return /^(kan du|kan jag|kan man|hur|varför|varfor|vad|vem|vilken|vilka|när|nar|var|får jag|far jag)\b/.test(text);
+}
+
+function agentQuestionAnswered(db, comment) {
+  return !!db.prepare(`SELECT 1
+                       FROM task_comments
+                       WHERE task_id = ?
+                         AND deleted_at IS NULL
+                         AND created_at >= ?
+                         AND id != ?
+                         AND author_role IN ('parent', 'agent')
+                       LIMIT 1`).get(comment.task_id, comment.created_at, comment.id);
+}
+
+function resolveDueWindow(query) {
+  const today = new Date();
+  const defaultDueTo = today.toISOString().slice(0, 10);
+  const defaultDueFrom = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const dueFrom = typeof query.due_from === 'string' && query.due_from ? query.due_from : defaultDueFrom;
+  const dueTo = typeof query.due_to === 'string' && query.due_to ? query.due_to : defaultDueTo;
+  return { dueFrom, dueTo };
+}
+
+function canAgentUpdateStatus(fromStatus, toStatus) {
+  return (
+    (fromStatus === 'received' && toStatus === 'started') ||
+    (fromStatus === 'started' && toStatus === 'thinks_done') ||
+    (fromStatus === 'thinks_done' && toStatus === 'confirmed_done')
+  );
 }
 
 function createApp(db) {
@@ -70,6 +149,8 @@ function createApp(db) {
   }
 
   app.post('/agent/tasks', (req, res) => {
+    const role = req.headers['x-role'];
+    if (role !== 'agent') return res.status(403).json({ error: 'forbidden' });
     const { child_user_id, title, source, source_external_id, subject = null, due_date = null } = req.body || {};
     if (!child_user_id || !title || !source || !source_external_id) return res.status(400).json({ error: 'missing fields' });
     ensureProgress(child_user_id);
@@ -82,12 +163,28 @@ function createApp(db) {
       db.prepare(`INSERT INTO tasks (id, child_user_id, title, subject, due_date, source, source_external_id, status, difficulty, planned_window, current_attempt_no, created_at, updated_at)
                   VALUES (?, ?, ?, ?, ?, ?, ?, 'received', 'unknown', 'unknown', 1, ?, ?)`).run(taskId, child_user_id, title, subject, due_date, source, source_external_id, nowIso(), nowIso());
       db.prepare('UPDATE child_progress_state SET hunger_score = hunger_score + 3, updated_at=? WHERE child_user_id=?').run(nowIso(), child_user_id);
-      emitTaskEvent(taskId, 'task_created', 'agent', actorRef(req, 'agent'), { source, source_external_id, hunger_delta: 3 });
+      emitTaskEvent(taskId, 'task_created', 'agent', actorRef(req, 'agent'), eventPayload(req, { source, source_external_id, hunger_delta: 3 }));
       recalcHungerCapacity(child_user_id);
       return db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
     });
 
     res.status(201).json(tx());
+  });
+
+  app.get('/agent/tasks', (req, res) => {
+    const role = req.headers['x-role'];
+    if (role !== 'agent') return res.status(403).json({ error: 'forbidden' });
+    const { child_user_id: childId = null } = req.query || {};
+    const { dueFrom, dueTo } = resolveDueWindow(req.query || {});
+    const params = [dueFrom, dueTo];
+    const childFilter = childId ? ' AND child_user_id = ?' : '';
+    if (childId) params.push(childId);
+    const rows = db.prepare(`SELECT * FROM tasks
+                             WHERE due_date IS NOT NULL
+                               AND due_date >= ?
+                               AND due_date <= ?${childFilter}
+                             ORDER BY due_date ASC, created_at ASC`).all(...params);
+    res.json(rows.map(withCanActions));
   });
 
   app.get('/tasks', (req, res) => {
@@ -109,6 +206,8 @@ function createApp(db) {
     const role = req.headers['x-role'];
     if (role !== 'child') return res.status(403).json({ error: 'only child can plan' });
     const { difficulty, planned_window } = req.body || {};
+    if (difficulty !== undefined && !VALID_DIFFICULTIES.has(difficulty)) return res.status(400).json({ error: 'invalid difficulty' });
+    if (planned_window !== undefined && !VALID_PLANNED_WINDOWS.has(planned_window)) return res.status(400).json({ error: 'invalid planned_window' });
     const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'not found' });
     ensureProgress(task.child_user_id);
@@ -120,13 +219,17 @@ function createApp(db) {
         changes.difficulty = { from: task.difficulty, to: difficulty };
         changes.difficulty_hunger_applied = applyHungerStep(task.id, task.current_attempt_no, 'difficulty_set', task.child_user_id);
       }
-      if (planned_window && planned_window !== task.planned_window) {
-        db.prepare('UPDATE tasks SET planned_window=?, updated_at=? WHERE id=?').run(planned_window, nowIso(), task.id);
-        changes.planned_window = { from: task.planned_window, to: planned_window };
-        changes.planned_window_hunger_applied = applyHungerStep(task.id, task.current_attempt_no, 'planning_set', task.child_user_id);
+      if (planned_window !== undefined) {
+        const plannedDate = derivePlannedDate(planned_window);
+        if (planned_window !== task.planned_window || plannedDate !== task.planned_date) {
+          db.prepare('UPDATE tasks SET planned_window=?, planned_date=?, updated_at=? WHERE id=?').run(planned_window, plannedDate, nowIso(), task.id);
+          changes.planned_window = { from: task.planned_window, to: planned_window };
+          changes.planned_date = { from: task.planned_date || null, to: plannedDate };
+          changes.planned_window_hunger_applied = applyHungerStep(task.id, task.current_attempt_no, 'planning_set', task.child_user_id);
+        }
       }
       if (Object.keys(changes).length > 0) {
-        emitTaskEvent(task.id, 'planning_updated', role, actorRef(req, role), { attempt_no: task.current_attempt_no, ...changes });
+        emitTaskEvent(task.id, 'planning_updated', role, actorRef(req, role), eventPayload(req, { attempt_no: task.current_attempt_no, ...changes }));
       }
       return db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
     });
@@ -142,6 +245,7 @@ function createApp(db) {
     ensureProgress(task.child_user_id);
 
     const allowed = (
+      (role === 'agent' && canAgentUpdateStatus(task.status, to_status)) ||
       (role === 'child' && task.status === 'received' && to_status === 'started') ||
       (role === 'child' && task.status === 'started' && to_status === 'thinks_done') ||
       ((role === 'parent' || role === 'agent') && task.status === 'thinks_done' && to_status === 'confirmed_done')
@@ -158,10 +262,10 @@ function createApp(db) {
       if (to_status === 'thinks_done') hungerApplied = applyHungerStep(task.id, task.current_attempt_no, 'status_thinks_done', task.child_user_id);
 
       db.prepare('UPDATE tasks SET status=?, updated_at=? WHERE id=?').run(to_status, nowIso(), task.id);
-      emitTaskEvent(task.id, 'status_changed', role, actorRef(req, role), { from_status: task.status, to_status, attempt_no: task.current_attempt_no, hunger_applied: hungerApplied });
+      emitTaskEvent(task.id, 'status_changed', role, actorRef(req, role), eventPayload(req, { from_status: task.status, to_status, attempt_no: task.current_attempt_no, hunger_applied: hungerApplied }));
 
       if (to_status === 'confirmed_done') {
-        emitTaskEvent(task.id, 'reward_available', role, actorRef(req, role), { difficulty: task.difficulty });
+        emitTaskEvent(task.id, 'reward_available', role, actorRef(req, role), eventPayload(req, { difficulty: task.difficulty }));
       }
       recalcHungerCapacity(task.child_user_id);
       return db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
@@ -183,7 +287,7 @@ function createApp(db) {
       const points = starPoints(task.difficulty);
       db.prepare('UPDATE tasks SET reward_collected_at=?, updated_at=? WHERE id=?').run(nowIso(), nowIso(), task.id);
       db.prepare('UPDATE child_progress_state SET xp_total=xp_total+?, stars_total=stars_total+?, updated_at=? WHERE child_user_id=?').run(points, points, nowIso(), task.child_user_id);
-      emitTaskEvent(task.id, 'reward_granted', role, actorRef(req, role), { difficulty: task.difficulty, xp_delta: points, stars_delta: points });
+      emitTaskEvent(task.id, 'reward_granted', role, actorRef(req, role), eventPayload(req, { difficulty: task.difficulty, xp_delta: points, stars_delta: points }));
       return db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
     });
 
@@ -202,7 +306,7 @@ function createApp(db) {
     const tx = db.transaction(() => {
       const eventId = id();
       db.prepare('INSERT INTO task_events (id, task_id, event_type, actor_type, actor_ref, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(eventId, task.id, 'confirmation_rejected', role, actorRef(req, role), nowIso(), JSON.stringify({ reason, from_status: task.status, to_status: 'started', nausea_delta: 1 }));
+        .run(eventId, task.id, 'confirmation_rejected', role, actorRef(req, role), nowIso(), JSON.stringify(eventPayload(req, { reason, from_status: task.status, to_status: 'started', nausea_delta: 1 })));
       db.prepare('UPDATE tasks SET status=?, current_attempt_no=current_attempt_no+1, updated_at=? WHERE id=?').run('started', nowIso(), task.id);
       db.prepare('UPDATE child_progress_state SET nausea_score=nausea_score+1, nausea_updated_at=?, updated_at=? WHERE child_user_id=?')
         .run(nowIso(), nowIso(), task.child_user_id);
@@ -213,6 +317,57 @@ function createApp(db) {
     });
 
     res.json(tx());
+  });
+
+  app.get('/agent/questions', (req, res) => {
+    const role = req.headers['x-role'];
+    if (role !== 'agent') return res.status(403).json({ error: 'forbidden' });
+    const { child_user_id: childId = null } = req.query || {};
+    const params = [];
+    const childClause = childId ? 'WHERE t.child_user_id = ?' : '';
+    if (childId) params.push(childId);
+    const rows = db.prepare(`SELECT c.*, t.title AS task_title, t.status AS task_status
+                             FROM task_comments c
+                             JOIN tasks t ON t.id = c.task_id
+                             ${childClause}
+                             ORDER BY c.created_at ASC`).all(...params);
+    const questions = rows
+      .filter((row) => row.deleted_at == null)
+      .filter((row) => row.author_role === 'child')
+      .filter((row) => isQuestionComment(row.message))
+      .map((row) => ({
+        ...row,
+        answered: agentQuestionAnswered(db, row),
+        is_question: true,
+      }));
+    res.json(questions);
+  });
+
+  app.post('/agent/questions/:commentId/reply', (req, res) => {
+    const role = req.headers['x-role'];
+    if (role !== 'agent') return res.status(403).json({ error: 'forbidden' });
+    const message = (req.body && req.body.message || '').trim();
+    if (!message) return res.status(400).json({ error: 'message required' });
+
+    const parentComment = db.prepare(`SELECT c.*, t.title AS task_title
+                                      FROM task_comments c
+                                      JOIN tasks t ON t.id = c.task_id
+                                      WHERE c.id = ? AND c.deleted_at IS NULL`).get(req.params.commentId);
+    if (!parentComment) return res.status(404).json({ error: 'not found' });
+
+    const commentId = id();
+    const userId = actorRef(req, 'agent');
+    const tx = db.transaction(() => {
+      db.prepare(`INSERT INTO task_comments (id, task_id, author_user_id, author_role, message, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?)`).run(commentId, parentComment.task_id, userId, 'agent', message, nowIso());
+      emitTaskEvent(parentComment.task_id, 'comment_created', 'agent', userId, eventPayload(req, {
+        comment_id: commentId,
+        reply_to_comment_id: parentComment.id,
+        reply_to_author_user_id: parentComment.author_user_id,
+      }));
+    });
+    tx();
+    res.status(201).json(db.prepare('SELECT * FROM task_comments WHERE id=?').get(commentId));
   });
 
   app.get('/tasks/:id/comments', (req, res) => {
@@ -246,7 +401,7 @@ function createApp(db) {
     const tx = db.transaction(() => {
       db.prepare(`INSERT INTO task_comments (id, task_id, author_user_id, author_role, message, created_at)
                   VALUES (?, ?, ?, ?, ?, ?)`).run(commentId, req.params.id, userId, role, message, nowIso());
-      emitTaskEvent(req.params.id, 'comment_created', role, userId, { comment_id: commentId });
+      emitTaskEvent(req.params.id, 'comment_created', role, userId, eventPayload(req, { comment_id: commentId }));
     });
     tx();
     res.status(201).json(db.prepare('SELECT * FROM task_comments WHERE id=?').get(commentId));
@@ -294,4 +449,4 @@ function createApp(db) {
   return app;
 }
 
-module.exports = { createApp };
+module.exports = { createApp, derivePlannedDate };

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   due_date TEXT,
   difficulty TEXT NOT NULL DEFAULT 'unknown' CHECK(difficulty IN ('easy','medium','hard','unknown')),
   planned_window TEXT NOT NULL DEFAULT 'unknown' CHECK(planned_window IN ('today','tomorrow','this_week','next_week','unknown')),
+  planned_date TEXT,
   status TEXT NOT NULL DEFAULT 'received' CHECK(status IN ('received','started','thinks_done','confirmed_done')),
   source TEXT NOT NULL,
   source_external_id TEXT NOT NULL,

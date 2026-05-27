@@ -68,6 +68,7 @@ Response-item (kort):
   "due_date": "2026-06-03",
   "difficulty": "easy|medium|hard|unknown",
   "planned_window": "today|tomorrow|this_week|next_week|unknown",
+  "planned_date": "YYYY-MM-DD|null",
   "status": "received|started|thinks_done|confirmed_done",
   "can_actions": ["set_difficulty","set_planning","mark_started","mark_thinks_done","confirm_done","reject_done","comment"]
 }
@@ -79,8 +80,9 @@ Detaljvy för expanderat kort.
 ### Mutation response shapes and frontend refresh behavior
 Current SQLite MVP mutation responses are intentionally small and stable:
 - `POST /agent/tasks` returns the created task row with status `received`, or the existing task row for the idempotent `source + source_external_id` case. It does not currently add `can_actions` to this mutation response; frontend should refetch `GET /tasks?child_user_id=...` or `GET /tasks/:taskId` when it needs hint-enriched state.
-- `PATCH /tasks/:taskId/planning` returns the updated task row after difficulty/planning changes. Refetch detail/list to receive `can_actions`.
-- `PATCH /tasks/:taskId/status` returns the updated task row after accepted status transitions. Refetch active list after `confirmed_done`, because active list excludes completed tasks.
+- `PATCH /tasks/:taskId/planning` returns the updated task row after difficulty/planning changes, including server-derived `planned_date`. Refetch detail/list to receive `can_actions`.
+- `PATCH /tasks/:taskId/status` returns the updated task row after accepted status transitions. Refetch active list after `confirmed_done`; confirmed tasks remain visible until `collect_reward`, then active list excludes them.
+- `POST /tasks/:taskId/collect_reward` returns the updated task row with `reward_collected_at`; frontend should refetch progress and active list.
 - `POST /tasks/:taskId/reject` returns `{ "ok": true }`; frontend should refetch task detail/list, progress, events only if needed for diagnostics, and `GET /children/:childUserId/animations/pending` for one-shot reject feedback.
 - `POST /tasks/:taskId/comments` returns the created comment row; frontend can append it locally or refetch `GET /tasks/:taskId/comments`.
 - `POST /children/:childUserId/animations/:animationId/ack` returns `{ acknowledged, seen_at }`; after `acknowledged: true`, the same animation will not appear in pending animations.
@@ -98,6 +100,8 @@ Body:
 
 Regel:
 - Endast child (förälder saknar behörighet)
+- Servern härleder och sparar `planned_date` från `planned_window`; klienten skickar ingen fri datuminput i v1.
+- `today` => lokal kalenderdag idag; `tomorrow` => lokal kalenderdag +1; `this_week` => kommande fredag, med roll-forward till nästa fredag om fredagen redan passerat; `next_week` => måndag i nästa kalendervecka; `unknown` => `planned_date: null`.
 - Trigger hunger-minskning **en gång per meningsfullt steg**, inte vid toggle-spam.
 - Total hunger-minskning: max **3** per uppgift/attempt-cykel.
 
@@ -111,11 +115,25 @@ Body:
 
 Rollregler:
 - Child: `received->started`, `started->thinks_done`
-- Parent/agent: `thinks_done->confirmed_done`
+- Parent: `thinks_done->confirmed_done`
+- Agent: status-only framåtövergångar `received->started`, `started->thinks_done`, `thinks_done->confirmed_done`; agent får inte ändra `difficulty` eller `planned_window`.
 
 Side effects:
 - meningsfull statusprogression => hunger minskar
-- `confirmed_done` => XP/stjärnor ökar enligt svårighetsgrad
+- `confirmed_done` => `reward_available` event; XP/stjärnor ökar först när barnet samlar in belöningen.
+
+### `POST /tasks/:taskId/collect_reward`
+Barnet samlar in belöning efter `confirmed_done`.
+
+Regel:
+- Endast child.
+- Kräver `status=confirmed_done`.
+- Kan bara köras en gång per uppgift.
+
+Side effects:
+- `reward_collected_at` sätts på uppgiften.
+- XP/stjärnor ökar enligt svårighetsgrad.
+- event: `reward_granted`.
 
 ### `POST /tasks/:taskId/reject`
 Förälder/agent avvisar `thinks_done`.
@@ -282,6 +300,7 @@ Nuvarande SQLite-MVP skriver event för:
 - `task_created`
 - `planning_updated`
 - `status_changed`
+- `reward_available`
 - `reward_granted`
 - `confirmation_rejected`
 - `animation_delivered`
@@ -302,6 +321,7 @@ Response-item:
 ```
 
 Payload-shape är avsiktligt händelsespecifik i MVP men ska inte innehålla credentials eller känsligt auth-material.
+Agent-anrop kan skicka `x-agent-provider` (t.ex. `hermes` eller `openclaw`); vid muterande agentanrop sparas värdet som `agent_provider` i eventets `payload_json` så att provider/actor kan spåras utan separat API-kontrakt per provider.
 
 ## SQLite MVP baseline notes (2026-05-25)
 - SQLite är MVP-databasen. `db/migrations/001_init_up.sql` är körbar baseline och enda aktiva schemaunderlag för MVP.
