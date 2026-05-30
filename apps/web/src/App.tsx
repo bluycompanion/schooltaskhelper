@@ -71,6 +71,9 @@ function hungerLabel(progress: ChildProgress | null): string {
 function onlineErrorCopy(error: unknown, fallback = 'Det gick inte att spara just nu. Försök igen.'): string {
   if (error instanceof ApiError) {
     const payloadErr = (error.payload as any)?.error;
+    if (error.status === 404 && typeof payloadErr === 'string' && payloadErr.toLowerCase().includes('not found')) {
+      return 'API hittades inte (404). Kontrollera proxy/base-url för /dev/schooltaskhelper.';
+    }
     if (payloadErr) return payloadErr;
     return `${fallback} [HTTP ${error.status}]`;
   }

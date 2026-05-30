@@ -12,7 +12,15 @@ export function getLocalViewContext() {
 }
 
 export function getApiBaseUrl(): string {
-  return import.meta.env.VITE_API_BASE_URL || '';
+  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
+  if (typeof window === 'undefined') return '';
+
+  const path = window.location.pathname || '';
+  const devPrefix = '/dev/schooltaskhelper';
+  const prodPrefix = '/schooltaskhelper';
+  if (path.startsWith(devPrefix)) return devPrefix;
+  if (path.startsWith(prodPrefix)) return prodPrefix;
+  return '';
 }
 
 export function isLocalDevMode(): boolean {
