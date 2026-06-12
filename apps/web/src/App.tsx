@@ -18,6 +18,8 @@ import {
 import { getApiBaseUrl, getLocalViewContext, isLocalDevMode } from './config';
 import './styles.css';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface LoadState {
   tasks: TaskSummary[];
   progress: ChildProgress | null;
@@ -33,48 +35,82 @@ type CommentsState = {
   inputError: string | null;
 };
 
+interface Particle {
+  id: string;
+  emoji: string;
+  x: number;
+  y: number;
+  opacity: number;
+}
+
+type AvatarMood = 'normal' | 'happy' | 'excited' | 'sick' | 'busy' | 'hungry' | 'sleeping';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const LEVEL_XP = 20;
+
+const avatarEmojis: Record<AvatarMood, string> = {
+  normal:   '🙂',
+  happy:    '😄',
+  excited:  '🤩',
+  sick:     '🤢',
+  busy:     '😮‍💨',
+  hungry:   '😫',
+  sleeping: '😴',
+};
+
 const difficultyLabel: Record<Difficulty, string> = {
-  easy: 'Enkel',
-  medium: 'Medel',
-  hard: 'Svår',
-  unknown: 'Inte valt',
+  easy: 'Enkel', medium: 'Medel', hard: 'Svår', unknown: 'Inte valt',
 };
 
 const planningLabel: Record<PlannedWindow, string> = {
-  today: 'Idag',
-  tomorrow: 'Imorgon',
-  this_week: 'Denna vecka',
-  next_week: 'Nästa vecka',
-  unknown: 'Vet inte än',
+  today: 'Idag', tomorrow: 'Imorgon', this_week: 'Denna vecka', next_week: 'Nästa vecka', unknown: 'Vet inte än',
 };
 
 const statusLabel: Record<string, string> = {
-  received: 'Ny',
-  started: 'Påbörjad',
-  thinks_done: 'Tror klar',
-  confirmed_done: 'Klar',
+  received: 'Ny', started: 'Påbörjad', thinks_done: 'Tror klar', confirmed_done: 'Klar',
 };
 
 const sourceLabel: Record<string, string> = {
-  school_platform: 'Skolplattformen',
-  manual: 'Manuell',
+  school_platform: 'Skolplattformen', manual: 'Manuell',
 };
 
-function hungerLabel(progress: ChildProgress | null): string {
-  if (!progress || progress.hunger_capacity <= 0) return 'Bra läge';
-  const ratio = progress.hunger_score / progress.hunger_capacity;
-  if (ratio <= 0.33) return 'Bra läge';
-  if (ratio <= 0.66) return 'Lite att planera';
+// ─── Particle configs per action ─────────────────────────────────────────────
+
+function particlesForAction(actionId: TaskActionId | string): { emojis: string[]; bar: 'hunger' | 'xp' | 'both' | 'none' } {
+  switch (actionId) {
+    case 'set_difficulty':
+    case 'set_planning':
+      return { emojis: ['🍔', '🍔', '🍟', '🍟', '🍔'], bar: 'hunger' };
+    case 'mark_started':
+      return { emojis: ['🍕', '🍕', '⚡', '🍕', '⚡'], bar: 'hunger' };
+    case 'mark_thinks_done':
+      return { emojis: ['🍕', '🍕', '⭐', '🍕', '🍕', '⭐'], bar: 'both' };
+    case 'confirm_done':
+      return { emojis: ['⭐', '🌟', '✨', '⭐', '🌟', '✨', '⭐'], bar: 'xp' };
+    case 'collect_reward':
+      return { emojis: ['⭐', '🌟', '✨', '💫', '🎉', '⭐', '🌟', '✨'], bar: 'xp' };
+    case 'reject_done':
+      return { emojis: ['🤢', '💧', '🤢'], bar: 'none' };
+    default:
+      return { emojis: ['✨', '⭐'], bar: 'none' };
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function workloadLabel(greenPercent: number, unplannedCount: number, taskCount: number): string {
+  if (taskCount === 0) return 'Bra läge';
+  if (unplannedCount > 0) return 'Dags att planera!';
+  if (greenPercent >= 67) return 'Bra läge';
+  if (greenPercent >= 34) return 'Lite att planera';
   return 'Fullt upp';
 }
 
 function onlineErrorCopy(error: unknown, fallback = 'Det gick inte att spara just nu. Försök igen.'): string {
   if (error instanceof ApiError) {
-    const payloadErr = (error.payload as any)?.error;
-    if (error.status === 404 && typeof payloadErr === 'string' && payloadErr.toLowerCase().includes('not found')) {
-      return 'API hittades inte (404). Kontrollera proxy/base-url för /dev/schooltaskhelper.';
-    }
-    if (payloadErr) return payloadErr;
+    const payloadErr = (error.payload as Record<string, unknown>)?.error;
+    if (typeof payloadErr === 'string') return payloadErr;
     return `${fallback} [HTTP ${error.status}]`;
   }
   const details = error instanceof Error ? ` [Detaljer: ${error.message} (${error.name})]` : ` [Detaljer: ${String(error)}]`;
@@ -109,6 +145,7 @@ function successCopy(actionId: TaskActionId): string {
   if (actionId === 'mark_thinks_done') return 'Toppen. Nu kan en vuxen kolla.';
   if (actionId === 'confirm_done') return 'Klar! Du fick stjärnor. 🌟';
   if (actionId === 'reject_done') return 'Uppgiften skickades tillbaka på ett snällt sätt.';
+  if (actionId === 'collect_reward') return 'Du samlade dina stjärnor! Snyggt jobbat!';
   return 'Sparat.';
 }
 
@@ -121,10 +158,16 @@ function parseEventPayload(payloadJson: string): Record<string, unknown> {
     const parsed = JSON.parse(payloadJson || '{}');
     if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
   } catch {
-    // Keep timeline resilient if one event payload is malformed.
+    // keep timeline resilient on malformed payload
   }
   return {};
 }
+
+function emptyCommentsState(): CommentsState {
+  return { items: [], loading: false, error: null, draft: '', saving: false, inputError: null };
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function App() {
   const context = useMemo(() => getLocalViewContext(), []);
@@ -133,21 +176,37 @@ export default function App() {
     () => new SchoolTaskApiClient({ baseUrl: getApiBaseUrl(), context }),
     [context],
   );
+
   const [state, setState] = useState<LoadState>({ tasks: [], progress: null, animations: [] });
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
-  
+
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [commentsByTask, setCommentsByTask] = useState<Record<string, CommentsState>>({});
   const [eventsByTask, setEventsByTask] = useState<Record<string, TaskEvent[]>>({});
-  const [activePopup, setActivePopup] = useState<{ taskId: string, type: 'difficulty' | 'planning' | 'status' } | null>(null);
-  const [flyingEmojis, setFlyingEmojis] = useState<{ id: string; emoji: string; x: number; y: number }[]>([]);
+  const [activePopup, setActivePopup] = useState<{ taskId: string; type: 'difficulty' | 'planning' | 'status' } | null>(null);
 
+  const [flyingEmojis, setFlyingEmojis] = useState<Particle[]>([]);
   const [savingActions, setSavingActions] = useState<Record<string, boolean>>({});
   const [cardErrors, setCardErrors] = useState<Record<string, string | null>>({});
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [feedback, setFeedback] = useState<{ message: string; motion: boolean } | null>(null);
   const playedAnimations = useRef<Set<string>>(new Set());
+
+  // Gamification state
+  const [tempMood, setTempMood] = useState<{ mood: AvatarMood; until: number } | null>(null);
+  const [barFlash, setBarFlash] = useState({ hunger: false, xp: false });
+  const [slidingOutTasks, setSlidingOutTasks] = useState<Set<string>>(new Set());
+  const [levelUpText, setLevelUpText] = useState<string | null>(null);
+  const prevXpRef = useRef(0);
+
+  // Parent: create-task form
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [newTaskDraft, setNewTaskDraft] = useState({ title: '', subject: '', dueDate: '' });
+  const [newTaskSaving, setNewTaskSaving] = useState(false);
+  const [newTaskError, setNewTaskError] = useState<string | null>(null);
+
+  // ─── Data loading ───────────────────────────────────────────────────────────
 
   const loadAll = useCallback(async (isInitial = false) => {
     if (isInitial) setLoading(true);
@@ -166,37 +225,21 @@ export default function App() {
     }
   }, [client, context.childUserId, context.role]);
 
-  useEffect(() => {
-    void loadAll(true);
-  }, [loadAll]);
+  useEffect(() => { void loadAll(true); }, [loadAll]);
 
   const loadComments = useCallback(async (taskId: string, force = false) => {
     if (!force && commentsByTask[taskId]?.items.length) return;
-    setCommentsByTask((current) => ({
-      ...current,
-      [taskId]: {
-        items: current[taskId]?.items ?? [],
-        draft: current[taskId]?.draft ?? '',
-        saving: current[taskId]?.saving ?? false,
-        inputError: null,
-        loading: true,
-        error: null,
-      },
+    setCommentsByTask((cur) => ({
+      ...cur,
+      [taskId]: { items: cur[taskId]?.items ?? [], draft: cur[taskId]?.draft ?? '', saving: false, inputError: null, loading: true, error: null },
     }));
     try {
       const comments = await client.listComments(taskId);
-      setCommentsByTask((current) => ({
-        ...current,
-        [taskId]: { ...(current[taskId] ?? emptyCommentsState()), items: comments, loading: false, error: null },
-      }));
+      setCommentsByTask((cur) => ({ ...cur, [taskId]: { ...(cur[taskId] ?? emptyCommentsState()), items: comments, loading: false, error: null } }));
     } catch (error) {
-      setCommentsByTask((current) => ({
-        ...current,
-        [taskId]: {
-          ...(current[taskId] ?? emptyCommentsState()),
-          loading: false,
-          error: onlineErrorCopy(error, 'Kommentarerna kunde inte hämtas just nu.'),
-        },
+      setCommentsByTask((cur) => ({
+        ...cur,
+        [taskId]: { ...(cur[taskId] ?? emptyCommentsState()), loading: false, error: onlineErrorCopy(error, 'Kommentarerna kunde inte hämtas just nu.') },
       }));
     }
   }, [client, commentsByTask]);
@@ -204,7 +247,7 @@ export default function App() {
   const loadEvents = useCallback(async (taskId: string) => {
     try {
       const events = await client.listEvents(taskId);
-      setEventsByTask((current) => ({ ...current, [taskId]: events }));
+      setEventsByTask((cur) => ({ ...cur, [taskId]: events }));
     } catch (error) {
       console.error('Kunde inte hämta händelser', error);
     }
@@ -219,119 +262,288 @@ export default function App() {
     }
   };
 
-  const spawnEmoji = (emoji: string, e?: React.MouseEvent) => {
-    let x = window.innerWidth / 2;
-    let y = window.innerHeight / 2;
-    if (e && 'clientX' in e) {
-      x = e.clientX - 20;
-      y = e.clientY - 20;
-    }
-    const newEmoji = { id: Math.random().toString(), emoji, x, y };
-    setFlyingEmojis(prev => [...prev, newEmoji]);
-    
-    setTimeout(() => {
-       const avatarEl = document.getElementById('main-avatar');
-       if (avatarEl) {
-         const avatarRect = avatarEl.getBoundingClientRect();
-         setFlyingEmojis(prev => prev.map(em => em.id === newEmoji.id ? { ...em, x: avatarRect.left + 16, y: avatarRect.top + 16 } : em));
-       }
-    }, 50);
+  // ─── Gamification helpers ───────────────────────────────────────────────────
 
-    setTimeout(() => {
-      setFlyingEmojis(prev => prev.filter(em => em.id !== newEmoji.id));
-    }, 800);
-  };
+  const triggerMood = useCallback((mood: AvatarMood, ms: number) => {
+    setTempMood({ mood, until: Date.now() + ms });
+    setTimeout(() => setTempMood(null), ms);
+  }, []);
+
+  const spawnParticles = useCallback((
+    emojis: string[],
+    e: React.MouseEvent | null,
+    barType: 'hunger' | 'xp' | 'both' | 'none' = 'none',
+  ) => {
+    const centerX = e?.clientX ?? window.innerWidth / 2;
+    const centerY = e?.clientY ?? window.innerHeight / 2;
+
+    emojis.forEach((emoji, i) => {
+      const delay = i * 50;
+      const id = `${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`;
+      const offsetX = (Math.random() - 0.5) * 70;
+      const offsetY = (Math.random() - 0.5) * 70;
+      const startX = centerX + offsetX - 16;
+      const startY = centerY + offsetY - 16;
+
+      setTimeout(() => {
+        setFlyingEmojis((prev) => [...prev, { id, emoji, x: startX, y: startY, opacity: 1 }]);
+
+        setTimeout(() => {
+          const avatarEl = document.getElementById('main-avatar');
+          if (avatarEl) {
+            const rect = avatarEl.getBoundingClientRect();
+            const destX = rect.left + rect.width / 2 - 16;
+            const destY = rect.top + rect.height / 2 - 16;
+            setFlyingEmojis((prev) => prev.map((p) => p.id === id ? { ...p, x: destX, y: destY } : p));
+          }
+        }, 50);
+
+        setTimeout(() => {
+          setFlyingEmojis((prev) => prev.map((p) => p.id === id ? { ...p, opacity: 0 } : p));
+          setTimeout(() => setFlyingEmojis((prev) => prev.filter((p) => p.id !== id)), 300);
+        }, 750);
+      }, delay);
+    });
+
+    if (barType !== 'none') {
+      const lastDelay = (emojis.length - 1) * 50 + 870;
+      setTimeout(() => {
+        setBarFlash({ hunger: barType === 'hunger' || barType === 'both', xp: barType === 'xp' || barType === 'both' });
+        setTimeout(() => setBarFlash({ hunger: false, xp: false }), 400);
+      }, lastDelay);
+    }
+  }, []);
+
+  // Level-up detection (frontend cosmetic, fires when xp crosses LEVEL_XP multiples)
+  useEffect(() => {
+    const xp = state.progress?.xp_total ?? 0;
+    const prev = prevXpRef.current;
+    if (prev > 0 && Math.floor(xp / LEVEL_XP) > Math.floor(prev / LEVEL_XP)) {
+      const newLevel = Math.floor(xp / LEVEL_XP) + 1;
+      setLevelUpText(`Nivå ${newLevel} uppnådd! 🎉`);
+      triggerMood('excited', 4000);
+      setTimeout(() => setLevelUpText(null), 2500);
+    }
+    prevXpRef.current = xp;
+  }, [state.progress?.xp_total, triggerMood]);
+
+  // One-shot reject animations
+  useEffect(() => {
+    const next = state.animations.find((a) => !playedAnimations.current.has(a.animation_key));
+    if (!next) return;
+    playedAnimations.current.add(next.animation_key);
+    const reducedMotion = typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const taskForAnimation = state.tasks.find((t) => t.id === next.task_id);
+    const titleText = taskForAnimation ? ` på ${taskForAnimation.title}` : '';
+    setFeedback({ message: `Nästan — kolla en gång till${titleText}.`, motion: !reducedMotion });
+
+    const timeout = window.setTimeout(() => {
+      void client
+        .ackAnimation(context.childUserId, next.id)
+        .then(() => {
+          setState((cur) => ({ ...cur, animations: cur.animations.filter((a) => a.id !== next.id) }));
+        })
+        .catch(() => {
+          setStatusMessage('Feedbacken kunde inte markeras som visad just nu.');
+        })
+        .finally(() => setFeedback(null));
+    }, reducedMotion ? 200 : 900);
+
+    return () => window.clearTimeout(timeout);
+  }, [client, context.childUserId, state.animations, state.tasks]);
+
+  // ─── Computed values ────────────────────────────────────────────────────────
+
+  // Sims-style need bar: each task contributes 3 fillable steps (planning,
+  // started, thinks_done) matching the backend hunger decrements. Tasks
+  // completed today stay in the denominator as fully fed slices so finishing
+  // a task never shrinks the green — the bar resets naturally next morning.
+  const activeCount = state.tasks.length;
+  const completedToday = state.progress?.completed_today ?? 0;
+  const totalSlices = activeCount + completedToday;
+  const unplannedCount = state.tasks.filter(
+    (t) => t.difficulty === 'unknown' && t.planned_window === 'unknown',
+  ).length;
+  const maxNeed = totalSlices * 3;
+  const activeNeed = activeCount * 3;
+  const satisfiedSteps = completedToday * 3
+    + (activeNeed - Math.min(state.progress?.hunger_score ?? 0, activeNeed));
+  const rawGreen = maxNeed > 0 ? (satisfiedSteps / maxNeed) * 100 : 100;
+  const slicePercent = totalSlices > 0 ? 100 / totalSlices : 100;
+  const brownPercent = Math.min((state.progress?.nausea_score ?? 0) * slicePercent, 40);
+  const greenPercent = Math.max(0, Math.min(rawGreen, 100 - brownPercent));
+  const hasUnplanned = unplannedCount > 0;
+
+  const currentXp = state.progress?.xp_total ?? 0;
+  const displayLevel = Math.floor(currentXp / LEVEL_XP) + 1;
+  const xpPercent = Math.round(((currentXp % LEVEL_XP) / LEVEL_XP) * 100);
+
+  // Sick is a short, transient state (while the reject feedback is showing).
+  // The persistent nausea signal lives in the brown bar segment and the 🤢
+  // badge on the rejected task card instead.
+  const avatarMood: AvatarMood = (() => {
+    if (feedback) return 'sick';
+    if (tempMood && tempMood.until > Date.now()) return tempMood.mood;
+    if (state.tasks.length === 0 && !loading) return 'sleeping';
+    if (hasUnplanned) return 'hungry';
+    if (greenPercent < 40) return 'busy';
+    return 'normal';
+  })();
+
+  // ─── Action handlers ────────────────────────────────────────────────────────
 
   const savePlanningPopup = async (task: TaskSummary, type: 'difficulty' | 'planning', value: string, e: React.MouseEvent) => {
-    const syntheticEvent = { clientX: e.clientX, clientY: e.clientY } as React.MouseEvent;
+    const syn = { clientX: e.clientX, clientY: e.clientY } as React.MouseEvent;
     setActivePopup(null);
-    const draft = type === 'difficulty' ? { difficulty: value as Difficulty, planned_window: task.planned_window } : { difficulty: task.difficulty, planned_window: value as PlannedWindow };
-    
+    const draft = type === 'difficulty'
+      ? { difficulty: value as Difficulty, planned_window: task.planned_window }
+      : { difficulty: task.difficulty, planned_window: value as PlannedWindow };
+
     const key = actionKey(task.id, type === 'difficulty' ? 'set_difficulty' : 'set_planning');
-    setSavingActions((current) => ({ ...current, [key]: true }));
-    setCardErrors((current) => ({ ...current, [task.id]: null }));
+    setSavingActions((cur) => ({ ...cur, [key]: true }));
+    setCardErrors((cur) => ({ ...cur, [task.id]: null }));
     try {
       await client.updatePlanning(task.id, draft);
-      if (type === 'difficulty' && task.difficulty === 'unknown') spawnEmoji('🍔', syntheticEvent);
-      if (type === 'planning' && task.planned_window === 'unknown') spawnEmoji('🍔', syntheticEvent);
+      const isFirst = type === 'difficulty' ? task.difficulty === 'unknown' : task.planned_window === 'unknown';
+      if (isFirst) {
+        const { emojis, bar } = particlesForAction(type === 'difficulty' ? 'set_difficulty' : 'set_planning');
+        spawnParticles(emojis, syn, bar);
+        triggerMood('happy', 3000);
+      }
       setStatusMessage(type === 'difficulty' ? successCopy('set_difficulty') : successCopy('set_planning'));
       await loadAll();
       if (expandedTaskId === task.id) void loadEvents(task.id);
     } catch (error) {
-      setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
+      setCardErrors((cur) => ({ ...cur, [task.id]: onlineErrorCopy(error) }));
     } finally {
-      setSavingActions((current) => ({ ...current, [key]: false }));
+      setSavingActions((cur) => ({ ...cur, [key]: false }));
     }
   };
 
   const saveStatusPopup = async (task: TaskSummary, status: string, e: React.MouseEvent) => {
-    const syntheticEvent = { clientX: e.clientX, clientY: e.clientY } as React.MouseEvent;
+    const syn = { clientX: e.clientX, clientY: e.clientY } as React.MouseEvent;
     setActivePopup(null);
     const key = actionKey(task.id, 'change_status');
-    setSavingActions((current) => ({ ...current, [key]: true }));
-    setCardErrors((current) => ({ ...current, [task.id]: null }));
+    setSavingActions((cur) => ({ ...cur, [key]: true }));
+    setCardErrors((cur) => ({ ...cur, [task.id]: null }));
     try {
       await client.updateStatus(task.id, status as TaskStatus);
-      if (status === 'started' && task.status === 'received') spawnEmoji('🍕', syntheticEvent);
-      else if (status === 'thinks_done' && task.status === 'started') spawnEmoji('🍕', syntheticEvent);
-      else if (status === 'confirmed_done' && task.status !== 'confirmed_done') spawnEmoji('⭐', syntheticEvent);
+      if (status === 'started' && task.status === 'received') {
+        const { emojis, bar } = particlesForAction('mark_started');
+        spawnParticles(emojis, syn, bar);
+        triggerMood('happy', 3000);
+      } else if (status === 'thinks_done') {
+        const { emojis, bar } = particlesForAction('mark_thinks_done');
+        spawnParticles(emojis, syn, bar);
+        triggerMood('happy', 3000);
+      } else if (status === 'confirmed_done') {
+        const { emojis, bar } = particlesForAction('confirm_done');
+        spawnParticles(emojis, syn, bar);
+        triggerMood('excited', 4000);
+      }
       setStatusMessage(`Status ändrad till ${statusLabel[status]}`);
       await loadAll();
       if (expandedTaskId === task.id) void loadEvents(task.id);
     } catch (error) {
-      setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
+      setCardErrors((cur) => ({ ...cur, [task.id]: onlineErrorCopy(error) }));
     } finally {
-      setSavingActions((current) => ({ ...current, [key]: false }));
+      setSavingActions((cur) => ({ ...cur, [key]: false }));
     }
   };
 
   const runAction = async (task: TaskSummary, action: ActionDescriptor, e: React.MouseEvent) => {
-    setCardErrors((current) => ({ ...current, [task.id]: null }));
+    setCardErrors((cur) => ({ ...cur, [task.id]: null }));
+
     if (action.id === 'set_difficulty' || action.id === 'set_planning') {
       setActivePopup({ taskId: task.id, type: action.id === 'set_difficulty' ? 'difficulty' : 'planning' });
       return;
     }
     if (action.id === 'comment') {
-      if (expandedTaskId !== task.id) {
-        toggleExpanded(task);
-      }
+      if (expandedTaskId !== task.id) toggleExpanded(task);
       return;
     }
+
     if (action.id === 'collect_reward') {
       const key = actionKey(task.id, action.id);
-      setSavingActions((current) => ({ ...current, [key]: true }));
+      setSavingActions((cur) => ({ ...cur, [key]: true }));
       try {
         await client.collectReward(task.id);
-        spawnEmoji('⭐', e);
-        setStatusMessage('Du samlade dina stjärnor! Snyggt jobbat!');
-        await loadAll();
-        if (expandedTaskId === task.id) void loadEvents(task.id);
+        const { emojis, bar } = particlesForAction('collect_reward');
+        spawnParticles(emojis, e, bar);
+        triggerMood('excited', 4000);
+        setStatusMessage(successCopy('collect_reward'));
+        setSlidingOutTasks((prev) => new Set([...prev, task.id]));
+        setTimeout(async () => {
+          await loadAll();
+          if (expandedTaskId === task.id) void loadEvents(task.id);
+          setSlidingOutTasks((prev) => { const next = new Set(prev); next.delete(task.id); return next; });
+        }, 400);
       } catch (error) {
-        setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
+        setCardErrors((cur) => ({ ...cur, [task.id]: onlineErrorCopy(error) }));
       } finally {
-        setSavingActions((current) => ({ ...current, [key]: false }));
+        setSavingActions((cur) => ({ ...cur, [key]: false }));
       }
       return;
     }
 
     const key = actionKey(task.id, action.id);
-    setSavingActions((current) => ({ ...current, [key]: true }));
+    setSavingActions((cur) => ({ ...cur, [key]: true }));
     try {
       const toStatus = nextStatusForAction(action.id);
       if (toStatus) {
         await client.updateStatus(task.id, toStatus);
-        if (toStatus === 'started' || toStatus === 'thinks_done' || toStatus === 'confirmed_done') {
-           spawnEmoji(toStatus === 'confirmed_done' ? '⭐' : '🍕', e);
+        if (toStatus === 'started') {
+          spawnParticles(particlesForAction('mark_started').emojis, e, 'hunger');
+          triggerMood('happy', 3000);
+        } else if (toStatus === 'thinks_done') {
+          spawnParticles(particlesForAction('mark_thinks_done').emojis, e, 'both');
+          triggerMood('happy', 3000);
+        } else if (toStatus === 'confirmed_done') {
+          spawnParticles(particlesForAction('confirm_done').emojis, e, 'xp');
+          triggerMood('excited', 4000);
         }
       }
-      if (action.id === 'reject_done') await client.rejectTask(task.id, context);
+      if (action.id === 'reject_done') {
+        await client.rejectTask(task.id, context);
+        spawnParticles(particlesForAction('reject_done').emojis, e, 'none');
+      }
       setStatusMessage(successCopy(action.id));
       await loadAll();
       if (expandedTaskId === task.id) void loadEvents(task.id);
     } catch (error) {
-      setCardErrors((current) => ({ ...current, [task.id]: onlineErrorCopy(error) }));
+      setCardErrors((cur) => ({ ...cur, [task.id]: onlineErrorCopy(error) }));
     } finally {
-      setSavingActions((current) => ({ ...current, [key]: false }));
+      setSavingActions((cur) => ({ ...cur, [key]: false }));
+    }
+  };
+
+  const submitNewTask = async (event: FormEvent) => {
+    event.preventDefault();
+    const title = newTaskDraft.title.trim();
+    if (!title) {
+      setNewTaskError('Skriv en titel först.');
+      return;
+    }
+    setNewTaskSaving(true);
+    setNewTaskError(null);
+    try {
+      await client.createParentTask({
+        child_user_id: context.childUserId,
+        title,
+        subject: newTaskDraft.subject.trim() || null,
+        due_date: newTaskDraft.dueDate || null,
+      });
+      setNewTaskDraft({ title: '', subject: '', dueDate: '' });
+      setNewTaskOpen(false);
+      setStatusMessage('Uppgiften skapades.');
+      await loadAll();
+    } catch (error) {
+      setNewTaskError(onlineErrorCopy(error, 'Det gick inte att skapa uppgiften just nu.'));
+    } finally {
+      setNewTaskSaving(false);
     }
   };
 
@@ -341,85 +553,64 @@ export default function App() {
     const message = commentState.draft.trim();
     if (!message) return;
 
-    setCommentsByTask((current) => ({
-      ...current,
-      [taskId]: { ...(current[taskId] ?? emptyCommentsState()), saving: true, inputError: null, error: null },
-    }));
+    setCommentsByTask((cur) => ({ ...cur, [taskId]: { ...(cur[taskId] ?? emptyCommentsState()), saving: true, inputError: null, error: null } }));
     try {
       const comment = await client.createComment(taskId, message);
-      setCommentsByTask((current) => ({
-        ...current,
-        [taskId]: {
-          ...(current[taskId] ?? emptyCommentsState()),
-          items: [...(current[taskId]?.items ?? []), comment],
-          draft: '',
-          saving: false,
-        },
+      setCommentsByTask((cur) => ({
+        ...cur,
+        [taskId]: { ...(cur[taskId] ?? emptyCommentsState()), items: [...(cur[taskId]?.items ?? []), comment], draft: '', saving: false },
       }));
     } catch (error) {
-      setCommentsByTask((current) => ({
-        ...current,
-        [taskId]: {
-          ...(current[taskId] ?? emptyCommentsState()),
-          saving: false,
-          error: onlineErrorCopy(error, 'Det gick inte att spara just nu.'),
-        },
+      setCommentsByTask((cur) => ({
+        ...cur,
+        [taskId]: { ...(cur[taskId] ?? emptyCommentsState()), saving: false, error: onlineErrorCopy(error, 'Det gick inte att spara just nu.') },
       }));
     }
   };
 
-  useEffect(() => {
-    const next = state.animations.find((animation) => !playedAnimations.current.has(animation.animation_key));
-    if (!next) return;
-    playedAnimations.current.add(next.animation_key);
-    const reducedMotion = typeof window !== 'undefined'
-      && typeof window.matchMedia === 'function'
-      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    const taskForAnimation = state.tasks.find(t => t.id === next.task_id);
-    const titleText = taskForAnimation ? ` på ${taskForAnimation.title}` : '';
-    setFeedback({ message: `Nästan — kolla en gång till${titleText}.`, motion: !reducedMotion });
-
-    const timeout = window.setTimeout(() => {
-      void client
-        .ackAnimation(context.childUserId, next.id)
-        .then(() => {
-          setState((current) => ({
-            ...current,
-            animations: current.animations.filter((animation) => animation.id !== next.id),
-          }));
-        })
-        .catch(() => {
-          setStatusMessage('Feedbacken kunde inte markeras som visad just nu.');
-        })
-        .finally(() => setFeedback(null));
-    }, reducedMotion ? 200 : 900);
-
-    return () => window.clearTimeout(timeout);
-  }, [client, context.childUserId, state.animations]);
-
-  const hungerPercent = state.progress?.hunger_capacity
-    ? Math.min(100, Math.round((state.progress.hunger_score / state.progress.hunger_capacity) * 100))
-    : 0;
-  const avatar = feedback ? (feedback.motion ? '🤢' : '🙂') : state.progress?.nausea_score ? '🤢' : '🙂';
+  // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <main className="appShell">
-      <section className={`topPanel ${feedback?.motion ? 'topPanel--feedback' : ''}`} aria-label="Framsteg">
-        <div className="avatar" id="main-avatar" aria-hidden="true">{avatar}</div>
+
+      {/* ── Top panel ── */}
+      <section className={`topPanel${feedback?.motion ? ' topPanel--feedback' : ''}`} aria-label="Framsteg">
+        <div className="avatarWrap">
+          <div className={`avatar avatar--${avatarMood}`} id="main-avatar" aria-hidden="true">
+            {avatarEmojis[avatarMood]}
+          </div>
+          <span className="avatarBadge">Niv.{displayLevel}</span>
+        </div>
         <div className="topPanelText">
           <p className="eyebrow">SchoolTaskHelper</p>
-          <h1>{state.progress?.nausea_score ? 'Behöver kollas igen' : hungerLabel(state.progress)}</h1>
-          <div className="hungerTrack" aria-label={`Hunger ${hungerPercent} procent`}>
-            <span style={{ width: `${hungerPercent}%` }} />
+          <h1>{feedback ? 'Behöver kollas igen' : workloadLabel(greenPercent, unplannedCount, activeCount)}</h1>
+          <div className="barsSection">
+            <div className="barRow">
+              <span className="barLabel">Hunger</span>
+              <div
+                className={`hungerTrack${barFlash.hunger ? ' bar--flash' : ''}${hasUnplanned ? ' hungerTrack--alert' : ''}`}
+                style={{ '--slice': `${slicePercent}%` } as React.CSSProperties}
+                aria-label={`Behov ${Math.round(greenPercent)} procent fyllt${brownPercent > 0 ? ', illamående aktivt' : ''}${hasUnplanned ? ', oplanerade uppgifter finns' : ''}`}
+              >
+                <span className="hungerFill" style={{ width: `${greenPercent}%` }} />
+                {brownPercent > 0 ? <span className="nauseaFill" style={{ width: `${brownPercent}%` }} /> : null}
+              </div>
+            </div>
+            <div className="barRow">
+              <span className="barLabel">XP</span>
+              <div className={`xpTrack${barFlash.xp ? ' bar--flash' : ''}`} aria-label={`XP ${xpPercent} procent till nästa nivå`}>
+                <span style={{ width: `${xpPercent}%` }} />
+              </div>
+            </div>
           </div>
           <p>{loading ? 'Hämtar uppgifter…' : `Du har ${state.tasks.length} uppgifter att hålla koll på.`}</p>
           <p className="metaLine">
-            Nivå {state.progress?.level ?? 1} · {state.progress?.stars_total ?? 0} stjärnor · {context.role === 'child' ? 'Barnvy' : 'Vuxenvy'}
+            Nivå {displayLevel} · {state.progress?.stars_total ?? 0} stjärnor · {context.role === 'child' ? 'Barnvy' : 'Vuxenvy'}
           </p>
         </div>
       </section>
 
+      {/* ── Dev panel ── */}
       {isDevMode ? (
         <section className="testPanel" aria-label="Lokalt testläge">
           <div>
@@ -434,16 +625,68 @@ export default function App() {
         </section>
       ) : null}
 
-      <div className="liveRegion" role="status" aria-live="polite">
-        {statusMessage}
-      </div>
+      {/* ── Parent: create task ── */}
+      {context.role === 'parent' ? (
+        <section className="parentToolbar" aria-label="Föräldraåtgärder">
+          <button className="primary" type="button" onClick={() => { setNewTaskError(null); setNewTaskOpen(true); }}>
+            + Ny uppgift
+          </button>
+        </section>
+      ) : null}
 
+      {newTaskOpen ? (
+        <div className="actionPopupBackdrop" onClick={() => setNewTaskOpen(false)}>
+          <div className="actionPopup" onClick={(e) => e.stopPropagation()}>
+            <h3>Ny uppgift till barnet</h3>
+            <form className="newTaskForm" onSubmit={(e) => void submitNewTask(e)}>
+              <label>
+                Uppgift
+                <input
+                  type="text"
+                  value={newTaskDraft.title}
+                  placeholder="Vad ska göras?"
+                  onChange={(e) => setNewTaskDraft((d) => ({ ...d, title: e.target.value }))}
+                  autoFocus
+                />
+              </label>
+              <label>
+                Ämne (frivilligt)
+                <input
+                  type="text"
+                  value={newTaskDraft.subject}
+                  placeholder="T.ex. Matte"
+                  onChange={(e) => setNewTaskDraft((d) => ({ ...d, subject: e.target.value }))}
+                />
+              </label>
+              <label>
+                Ska vara klar (frivilligt)
+                <input
+                  type="date"
+                  value={newTaskDraft.dueDate}
+                  onChange={(e) => setNewTaskDraft((d) => ({ ...d, dueDate: e.target.value }))}
+                />
+              </label>
+              {newTaskError ? <p className="errorText" role="alert">{newTaskError}</p> : null}
+              <button className="primary" type="submit" disabled={newTaskSaving || !newTaskDraft.title.trim()}>
+                {newTaskSaving ? 'Skapar…' : 'Skapa uppgift'}
+              </button>
+            </form>
+            <button className="secondary popupClose" type="button" onClick={() => setNewTaskOpen(false)}>Avbryt</button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Live region ── */}
+      <div className="liveRegion" role="status" aria-live="polite">{statusMessage}</div>
+
+      {/* ── Reject feedback ── */}
       {feedback ? (
-        <aside className={`feedback ${feedback.motion ? 'feedback--motion' : ''}`} role="status" aria-live="polite">
+        <aside className={`feedback${feedback.motion ? ' feedback--motion' : ''}`} role="status" aria-live="polite">
           <span aria-hidden="true">🤢</span> {feedback.message}
         </aside>
       ) : null}
 
+      {/* ── Main content ── */}
       {listError ? (
         <section className="stateCard" role="alert">
           <p>{listError}</p>
@@ -467,22 +710,36 @@ export default function App() {
             const actions = getVisibleActions(task, context);
             const expanded = expandedTaskId === task.id;
             const commentsState = commentsByTask[task.id] ?? emptyCommentsState();
+            const events = eventsByTask[task.id] ?? [];
+            const comments = commentsState.items;
 
-            const events = eventsByTask[task.id] || [];
-            const comments = commentsState.items || [];
+            const hasReward = actions.some((a) => a.id === 'collect_reward');
+            const isSliding = slidingOutTasks.has(task.id);
+            const isNauseating = (task.current_attempt_no ?? 1) > 1 && task.status !== 'confirmed_done';
+            const cardClass = `taskCard${
+              isSliding       ? ' taskCard--slideout'
+              : hasReward     ? ' taskCard--reward'
+              : isNauseating  ? ' taskCard--nausea'
+              : actions.length > 0 ? ' taskCard--actionable'
+              : ''
+            }`;
+
             const combinedTimeline = [
-              ...events.map(ev => ({ type: 'event' as const, data: ev, time: new Date(ev.created_at).getTime() })),
-              ...comments.map(c => ({ type: 'comment' as const, data: c, time: new Date(c.created_at).getTime() })),
-              { type: 'source' as const, data: { source: task.source }, time: new Date(task.created_at || 0).getTime() - 1 }
+              ...events.map((ev) => ({ type: 'event' as const, data: ev, time: new Date(ev.created_at).getTime() })),
+              ...comments.map((c) => ({ type: 'comment' as const, data: c, time: new Date(c.created_at).getTime() })),
+              { type: 'source' as const, data: { source: task.source }, time: new Date(task.created_at ?? 0).getTime() - 1 },
             ].sort((a, b) => b.time - a.time);
 
             return (
-              <article className="taskCard" key={task.id}>
+              <article className={cardClass} key={task.id}>
                 <div className="taskCardHeader">
                   <div className="taskHeaderContent">
-                    <h2>{task.title}</h2>
+                    <h2>
+                      {isNauseating ? <span className="nauseaBadge" title="Behöver kollas igen" aria-label="Behöver kollas igen">🤢</span> : null}
+                      {task.title}
+                    </h2>
                     <p className="metaLine">
-                      {task.subject || 'Ämne saknas'} · {task.due_date || 'Inget datum'}
+                      {task.subject ?? 'Ämne saknas'} · {task.due_date ?? 'Inget datum'}
                     </p>
                     <p className="subMetaLine">
                       Svårighet: <strong>{difficultyLabel[task.difficulty]}</strong> · Plan: <strong>{planningLabel[task.planned_window]}</strong> · Status: <strong>{statusLabel[task.status]}</strong>
@@ -499,18 +756,20 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* ── Action buttons ── */}
                 {(() => {
-                  const primaryActions = actions.filter(a => a.id !== 'comment' && a.id !== 'set_difficulty' && a.id !== 'set_planning');
-                  const mainAction = primaryActions.length > 0 ? primaryActions[0] : null;
+                  const primaryActions = actions.filter((a) => a.id !== 'comment' && a.id !== 'set_difficulty' && a.id !== 'set_planning');
+                  const mainAction = primaryActions[0] ?? null;
                   const actionsToRender = expanded ? primaryActions : (mainAction ? [mainAction] : []);
-                  
+
                   return actionsToRender.length > 0 ? (
                     <div className="actions" aria-label="Tillgängliga åtgärder">
                       {actionsToRender.map((action) => {
                         const saving = Boolean(savingActions[actionKey(task.id, action.id)]);
+                        const btnClass = action.id === 'collect_reward' ? 'btn-reward' : action.kind;
                         return (
                           <button
-                            className={action.kind}
+                            className={btnClass}
                             key={action.id}
                             type="button"
                             disabled={saving}
@@ -528,38 +787,38 @@ export default function App() {
 
                 {cardErrors[task.id] ? <p className="errorText" role="alert">{cardErrors[task.id]}</p> : null}
 
+                {/* ── Popup ── */}
                 {activePopup?.taskId === task.id ? (
                   <div className="actionPopupBackdrop" onClick={() => setActivePopup(null)}>
-                    <div className="actionPopup" onClick={e => e.stopPropagation()}>
-                      <h3>{activePopup.type === 'difficulty' ? 'Hur svår känns den?' : activePopup.type === 'planning' ? 'När tänker du jobba med den?' : 'Ändra status'}</h3>
+                    <div className="actionPopup" onClick={(e) => e.stopPropagation()}>
+                      <h3>
+                        {activePopup.type === 'difficulty' ? 'Hur svår känns den?'
+                          : activePopup.type === 'planning' ? 'När tänker du jobba med den?'
+                          : 'Ändra status'}
+                      </h3>
                       <div className="popupButtons">
-                        {activePopup.type === 'difficulty' && (
-                          (['easy', 'medium', 'hard'] as Difficulty[]).map((value) => (
-                            <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'difficulty', value, e)}>
-                              {difficultyLabel[value]}
-                            </button>
-                          ))
-                        )}
-                        {activePopup.type === 'planning' && (
-                          (['today', 'tomorrow', 'this_week', 'next_week'] as PlannedWindow[]).map((value) => (
-                            <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'planning', value, e)}>
-                              {planningLabel[value]}
-                            </button>
-                          ))
-                        )}
-                        {activePopup.type === 'status' && (
-                          (['received', 'started', 'thinks_done', 'confirmed_done']).map((value) => (
-                            <button key={value} className="secondary" type="button" onClick={(e) => saveStatusPopup(task, value, e)}>
-                              {statusLabel[value]}
-                            </button>
-                          ))
-                        )}
+                        {activePopup.type === 'difficulty' && (['easy', 'medium', 'hard'] as Difficulty[]).map((value) => (
+                          <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'difficulty', value, e)}>
+                            {difficultyLabel[value]}
+                          </button>
+                        ))}
+                        {activePopup.type === 'planning' && (['today', 'tomorrow', 'this_week', 'next_week'] as PlannedWindow[]).map((value) => (
+                          <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'planning', value, e)}>
+                            {planningLabel[value]}
+                          </button>
+                        ))}
+                        {activePopup.type === 'status' && (['received', 'started', 'thinks_done', 'confirmed_done']).map((value) => (
+                          <button key={value} className="secondary" type="button" onClick={(e) => saveStatusPopup(task, value, e)}>
+                            {statusLabel[value]}
+                          </button>
+                        ))}
                       </div>
                       <button className="secondary popupClose" type="button" onClick={() => setActivePopup(null)}>Avbryt</button>
                     </div>
                   </div>
                 ) : null}
 
+                {/* ── Expanded details ── */}
                 {expanded ? (
                   <div className="taskDetails">
                     <div className="tinyActions">
@@ -570,54 +829,56 @@ export default function App() {
 
                     <section className="detailBlock timelineBlock" aria-labelledby={`log-${task.id}`}>
                       <h3 id={`log-${task.id}`}>Logg & Kommentarer</h3>
-                      
+
                       {combinedTimeline.length > 0 ? (
                         <ul className="historyLog">
-                          {combinedTimeline.map(item => {
-                            const dateStr = new Date(item.time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute:'2-digit', month: 'short', day: 'numeric' });
-                            
+                          {combinedTimeline.map((item) => {
+                            const dateStr = new Date(item.time).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' });
+
                             if (item.type === 'source') {
                               const sourceName = item.data.source ? sourceLabel[item.data.source] ?? item.data.source : 'Manuell';
                               return <li key={`src-${task.id}`}><span className="logTime">{dateStr}</span> <span className="logMsg">Källa: {sourceName}</span></li>;
-                            } else if (item.type === 'event') {
+                            }
+                            if (item.type === 'event') {
                               const ev = item.data as TaskEvent;
                               let msg = ev.event_type;
                               if (ev.event_type === 'status_changed') {
                                 const payload = parseEventPayload(ev.payload_json);
-                                const toStatus = String(payload.to_status || '');
-                                msg = `Status ändrad till ${statusLabel[toStatus] || toStatus || 'okänd status'}`;
+                                const toStatus = String(payload.to_status ?? '');
+                                msg = `Status ändrad till ${statusLabel[toStatus] ?? toStatus ?? 'okänd status'}`;
                               } else if (ev.event_type === 'planning_updated') {
                                 const payload = parseEventPayload(ev.payload_json);
-                                const difficultyValue = (payload.difficulty as { to?: Difficulty } | undefined)?.to;
-                                const plannedWindowValue = (payload.planned_window as { to?: PlannedWindow } | undefined)?.to;
-                                if (difficultyValue) msg = `Svårighet satt till ${difficultyLabel[difficultyValue]}`;
-                                else if (plannedWindowValue) msg = `Plan satt till ${planningLabel[plannedWindowValue]}`;
-                              } else if (ev.event_type === 'task_created') msg = 'Uppgift skapad';
-                              else return null;
-                              
+                                const diffVal = (payload.difficulty as { to?: Difficulty } | undefined)?.to;
+                                const planVal = (payload.planned_window as { to?: PlannedWindow } | undefined)?.to;
+                                if (diffVal) msg = `Svårighet satt till ${difficultyLabel[diffVal]}`;
+                                else if (planVal) msg = `Plan satt till ${planningLabel[planVal]}`;
+                              } else if (ev.event_type === 'task_created') {
+                                msg = 'Uppgift skapad';
+                              } else {
+                                return null;
+                              }
                               return <li key={`ev-${ev.id}`}><span className="logTime">{dateStr}</span> <span className="logMsg">{msg}</span></li>;
-                            } else {
-                              const c = item.data as TaskComment;
-                              const author = c.author_role === 'child' ? 'Barn' : 'Vuxen';
-                              return (
-                                <li key={`c-${c.id}`}>
-                                  <span className="logTime">{dateStr}</span> 
-                                  <span className="logMsg"><strong>{author}:</strong> {c.message}</span>
-                                </li>
-                              );
                             }
+                            const c = item.data as TaskComment;
+                            const author = c.author_role === 'child' ? 'Barn' : 'Vuxen';
+                            return (
+                              <li key={`c-${c.id}`}>
+                                <span className="logTime">{dateStr}</span>
+                                <span className="logMsg"><strong>{author}:</strong> {c.message}</span>
+                              </li>
+                            );
                           })}
                         </ul>
                       ) : <p className="metaLine">Laddar historik...</p>}
 
-                      <form className="compactCommentForm" onSubmit={(event) => void submitComment(event, task.id)}>
+                      <form className="compactCommentForm" onSubmit={(e) => void submitComment(e, task.id)}>
                         <input
                           type="text"
                           placeholder="Skriv en snabb kommentar…"
                           value={commentsState.draft}
-                          onChange={(event) => setCommentsByTask((current) => ({
-                            ...current,
-                            [task.id]: { ...(current[task.id] ?? emptyCommentsState()), draft: event.target.value, inputError: null },
+                          onChange={(e) => setCommentsByTask((cur) => ({
+                            ...cur,
+                            [task.id]: { ...(cur[task.id] ?? emptyCommentsState()), draft: e.target.value, inputError: null },
                           }))}
                         />
                         <button className="secondary" type="submit" disabled={commentsState.saving || !commentsState.draft.trim()}>
@@ -633,16 +894,24 @@ export default function App() {
         </section>
       )}
 
-      {/* Flygande emojis för gamification */}
-      {flyingEmojis.map(emoji => (
-        <div key={emoji.id} className="flyingFood" style={{ left: emoji.x, top: emoji.y }}>
-          {emoji.emoji}
+      {/* ── Particles ── */}
+      {flyingEmojis.map((p) => (
+        <div
+          key={p.id}
+          className="flyingFood"
+          style={{ left: p.x, top: p.y, opacity: p.opacity }}
+        >
+          {p.emoji}
         </div>
       ))}
+
+      {/* ── Level-up banner ── */}
+      {levelUpText ? (
+        <div className="levelUpBanner" role="status" aria-live="polite">
+          <h2>{levelUpText}</h2>
+        </div>
+      ) : null}
+
     </main>
   );
-}
-
-function emptyCommentsState(): CommentsState {
-  return { items: [], loading: false, error: null, draft: '', saving: false, inputError: null };
 }

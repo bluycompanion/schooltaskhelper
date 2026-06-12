@@ -82,3 +82,11 @@
 - Lade till agent-API för testning från andra platser/andra agenter: `/agent/tasks`, `/agent/questions` och `/agent/questions/:commentId/reply`; agent-anrop använder `x-role: agent` och kan bära `x-agent-provider` för Hermes/OpenClaw-spårning.
 - Verifierade lokalt att nya agent-endpoints fungerar mot dev-servern och seedade om demo-data efter smoke-test.
 - Rättade agent-API-kontraktet så status-only agentövergångar är dokumenterade, `reward_available`/`collect_reward`-semantiken syns i API-kontraktet och `x-agent-provider` sparas i eventpayloads för muterande agentanrop.
+
+## 2026-06-12
+- Synkade lokal `main` med GitHub `origin/main`; lokal checkout var 2 commits bakom och fast-forwardades till `50fc5cf`.
+- Pulled commits: `bed74fb feat: finalize agent API and reward flow updates` och `50fc5cf Fix subpath API base detection and improve 404 API error copy`.
+- Verifierade efter sync med `npm.cmd test` (13/13), `npm.cmd run test:web` (6/6), `npm.cmd run typecheck:web` och `npm.cmd run build:web`; alla passerade.
+- Lade till `docs/NEXT_AGENT_HANDOFF_2026-06-12.md` med sammanfattning av GitHub-synken, verifierad baseline och varning om lokala ocommittade ändringar som inte ska skrivas över utan JW-beslut.
+- Uppdaterade `docs/FUTURE_ACTION_TRACKER.md` så agent-API-planen inte längre beskrivs som helt oimplementerad efter `bed74fb`.
+- Verifierade även aktuell ocommittad arbetsyta efter handoff-noteringarna: `npm.cmd test` (14/14), `npm.cmd run test:web` (6/6), `npm.cmd run typecheck:web` och `npm.cmd run build:web` passerade.

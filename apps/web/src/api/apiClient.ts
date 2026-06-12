@@ -77,6 +77,7 @@ export interface ChildProgress {
   level: number;
   stars_total: number;
   nausea_score: number;
+  completed_today?: number;
   updated_at: string;
 }
 
@@ -225,6 +226,18 @@ export class SchoolTaskApiClient {
       roleContext: context,
       includeUserId: true,
       body: { message },
+    });
+  }
+
+  createParentTask(
+    body: { child_user_id: string; title: string; subject?: string | null; due_date?: string | null },
+    context = this.requireContext(),
+  ): Promise<TaskSummary> {
+    return this.request('/tasks', {
+      method: 'POST',
+      roleContext: context,
+      includeUserId: true,
+      body,
     });
   }
 

@@ -52,6 +52,36 @@ test('seedDevData resets predictable local GUI verification data', async () => {
   );
 });
 
+test('parent can create manual tasks via POST /tasks', async () => {
+  const { app } = setup();
+
+  const forbidden = await request(app).post('/tasks').set('x-role', 'child').send({ child_user_id: 'child1', title: 'Nope' });
+  assert.equal(forbidden.status, 403);
+
+  const missing = await request(app).post('/tasks').set('x-role', 'parent').send({ child_user_id: 'child1', title: '   ' });
+  assert.equal(missing.status, 400);
+
+  const badDate = await request(app).post('/tasks').set('x-role', 'parent').send({ child_user_id: 'child1', title: 'T', due_date: 'imorgon' });
+  assert.equal(badDate.status, 400);
+
+  const created = await request(app).post('/tasks').set('x-role', 'parent').set('x-user-id', 'parent1')
+    .send({ child_user_id: 'child1', title: 'Städa rummet', subject: 'Hemma', due_date: '2026-06-20' });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.source, 'manual');
+  assert.equal(created.body.status, 'received');
+  assert.equal(created.body.difficulty, 'unknown');
+  assert.deepEqual(created.body.can_actions, ['set_difficulty', 'set_planning', 'mark_started', 'comment']);
+
+  const progress = await request(app).get('/children/child1/progress');
+  assert.equal(progress.body.hunger_score, 3);
+  assert.equal(progress.body.hunger_capacity, 10);
+
+  const events = await request(app).get(`/tasks/${created.body.id}/events`);
+  assert.equal(events.body[0].event_type, 'task_created');
+  assert.equal(events.body[0].actor_type, 'parent');
+  assert.equal(events.body[0].actor_ref, 'parent1');
+});
+
 test('hunger +3 on new task and -1 progression capped at 3', async () => {
   const { app } = setup();
   const create = await request(app).post('/agent/tasks').set('x-role', 'agent').set('x-user-id', 'agent1').send({ child_user_id: 'child1', title: 'T1', source: 'manual', source_external_id: 'a1' });
@@ -182,17 +212,23 @@ test('stars/xp by difficulty + nausea + one-shot animation ack', async () => {
   assert.ok(rejectEvent);
   assert.deepEqual(JSON.parse(rejectEvent.payload_json), { reason: null, from_status: 'thinks_done', to_status: 'started', nausea_delta: 1 });
 
+  // Nausea stays while the rejected task is unconfirmed, even after the child resubmits.
   await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'child').send({ to_status: 'thinks_done' });
-  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'parent').send({ to_status: 'confirmed_done' });
-  await request(app).post(`/tasks/${taskId}/collect_reward`).set('x-role', 'child').send();
   progress = await request(app).get('/children/child1/progress');
-  assert.equal(progress.body.stars_total, 10);
-  assert.equal(progress.body.xp_total, 10);
+  assert.equal(progress.body.nausea_score, 1);
 
-  // 24h decay
-  db.prepare("UPDATE child_progress_state SET nausea_updated_at = datetime('now','-25 hours') WHERE child_user_id='child1'").run();
+  // Adult confirmation clears the nausea for that task.
+  await request(app).patch(`/tasks/${taskId}/status`).set('x-role', 'parent').send({ to_status: 'confirmed_done' });
   progress = await request(app).get('/children/child1/progress');
   assert.equal(progress.body.nausea_score, 0);
+
+  // hard (10) + planning bonus (2) since difficulty+window were set before thinks_done.
+  assert.equal(progress.body.completed_today, 0);
+  await request(app).post(`/tasks/${taskId}/collect_reward`).set('x-role', 'child').send();
+  progress = await request(app).get('/children/child1/progress');
+  assert.equal(progress.body.stars_total, 12);
+  assert.equal(progress.body.xp_total, 12);
+  assert.equal(progress.body.completed_today, 1);
 });
 
 test('lists active tasks by due date with can_actions and task details', async () => {
@@ -346,7 +382,7 @@ test('events endpoint records task lifecycle, rewards, feedback delivery, and ac
   assert.deepEqual(JSON.parse(rejectEvent.payload_json), { reason: 'Needs sources', from_status: 'thinks_done', to_status: 'started', nausea_delta: 1 });
 
   const rewardEvent = events.body.find((event) => event.event_type === 'reward_granted');
-  assert.deepEqual(JSON.parse(rewardEvent.payload_json), { difficulty: 'hard', xp_delta: 10, stars_delta: 10 });
+  assert.deepEqual(JSON.parse(rewardEvent.payload_json), { difficulty: 'hard', xp_delta: 12, stars_delta: 12, planning_bonus: 2 });
 
   const deliveredEvent = events.body.find((event) => event.event_type === 'animation_delivered');
   assert.equal(JSON.parse(deliveredEvent.payload_json).animation_id, pending.body[0].id);

@@ -1,10 +1,16 @@
 # Future Action Tracker — API focus
 
-> **Status:** planning only
+> **Status:** partly implemented on `main` as of `bed74fb`; keep this file as future/backlog context
 >
-> **Scope now:** no implementation yet, no deploy, no UI work
+> **Scope now:** agent API baseline exists; remaining items should be re-reviewed against the current code before implementation
 >
 > **Goal:** move the project toward an agent-friendly API where Hermès and OpenClaw can read tasks, update status, create tasks, and handle child questions via comments while every action is traced in the event log.
+
+## 2026-06-12 sync note
+
+The `bed74fb` commit implemented the first agent API baseline described here, including task window reads, agent question reads/replies, status-only agent transitions, and provider trace payloads. Treat the proposal below as historical planning/backlog context, not as a statement that no implementation exists.
+
+See `docs/NEXT_AGENT_HANDOFF_2026-06-12.md` for the GitHub sync summary and the current local dirty-tree warning.
 
 ## Notes from latest review
 
