@@ -83,6 +83,18 @@
 - Verifierade lokalt att nya agent-endpoints fungerar mot dev-servern och seedade om demo-data efter smoke-test.
 - Rättade agent-API-kontraktet så status-only agentövergångar är dokumenterade, `reward_available`/`collect_reward`-semantiken syns i API-kontraktet och `x-agent-provider` sparas i eventpayloads för muterande agentanrop.
 
+## 2026-05-30
+- Förberedde `gui/501`-flöde för schooltaskhelper med lokala driftsskript:
+  - `scripts/dev-start.sh`
+  - `scripts/install_dev_launchd.sh`
+  - `scripts/service.sh`
+- Skripten installerar LaunchAgent i `~/Library/LaunchAgents/com.webhosting.schooltaskhelper.dev.plist` och använder `launchctl` i `gui/501`-domänen.
+
+## 2026-06-13
+- Verifierade aktuell dev-baseline efter Node ABI-omkompilering av `better-sqlite3` (`npm rebuild better-sqlite3`).
+- Körde `npm test`, `npm run test:web`, `npm run typecheck:web` och `npm run build:web`; alla passerade.
+- Bekräftade att lokala dev-hälsan svarar på `http://127.0.0.1:4321/health` och att public dev-route finns bakom Caddy-auth på `https://bluycompanion.duckdns.org/dev/schooltaskhelper/`.
+
 ## 2026-06-12
 - Synkade lokal `main` med GitHub `origin/main`; lokal checkout var 2 commits bakom och fast-forwardades till `50fc5cf`.
 - Pulled commits: `bed74fb feat: finalize agent API and reward flow updates` och `50fc5cf Fix subpath API base detection and improve 404 API error copy`.
