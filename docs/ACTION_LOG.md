@@ -94,6 +94,7 @@
 - Verifierade aktuell dev-baseline efter Node ABI-omkompilering av `better-sqlite3` (`npm rebuild better-sqlite3`).
 - Körde `npm test`, `npm run test:web`, `npm run typecheck:web` och `npm run build:web`; alla passerade.
 - Bekräftade att lokala dev-hälsan svarar på `http://127.0.0.1:4321/health` och att public dev-route finns bakom Caddy-auth på `https://bluycompanion.duckdns.org/dev/schooltaskhelper/`.
+- Synkade API-kontrakt och arkitekturunderlag med faktisk implementation: `POST /tasks` finns för parent-manual tasks, `GET /agent/tasks` finns för agent-listning, frontend använder fortfarande `/tasks` som huvudflöde, och `POST /tasks/:taskId/reject` återöppnar i nuvarande backend alltid till `started`.
 
 ## 2026-06-12
 - Synkade lokal `main` med GitHub `origin/main`; lokal checkout var 2 commits bakom och fast-forwardades till `50fc5cf`.

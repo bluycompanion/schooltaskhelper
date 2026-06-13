@@ -68,6 +68,13 @@ Den lokala MVP:n använder enkla dev-headers för muterande requests:
 
 `can_actions` i task-responser är en plain-language UI-hint: den beskriver vilka knappar som kan vara relevanta för taskens status. Den är inte säkerhet eller auktorisation. Backendens roll-/statusvalidering i muterande endpoints är fortsatt auktoritativ.
 
+## Task API-karta
+- Frontend använder `GET /tasks?child_user_id=...` som huvudlista för både barn- och föräldervyer.
+- Frontend använder `GET /tasks/:taskId`, `PATCH /tasks/:taskId/planning`, `PATCH /tasks/:taskId/status`, `POST /tasks/:taskId/comments`, `POST /tasks/:taskId/collect_reward` och `POST /tasks/:taskId/reject` för task-flödet.
+- `POST /tasks` används för manuella uppgifter från föräldervyn.
+- `GET /agent/tasks` och `POST /agent/tasks` finns för agent/system-flödet, men React-frontend anropar dem inte i nuläget.
+- Progress och reject-feedback hämtas via `GET /children/:childUserId/progress`, `GET /children/:childUserId/animations/pending` och `POST /children/:childUserId/animations/:animationId/ack`.
+
 ## V1 scope guard
 - Ingen filter-UI.
 - Ingen synlig historik-UI; aktiva listan exkluderar `confirmed_done`.

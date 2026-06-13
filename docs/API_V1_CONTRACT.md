@@ -48,6 +48,14 @@ Side effects:
 - event: `task_created_by_agent`
 - hunger +3 (initial belastning när ny uppgift kommer in)
 
+### `GET /agent/tasks?child_user_id=...&due_from=...&due_to=...`
+Agent-only listvy för uppgifter i ett datumfönster.
+
+Regel:
+- `x-role` måste vara `agent`
+- filtrerar på `child_user_id` när det anges
+- sorterar på `due_date ASC`, sedan `created_at ASC`
+
 ---
 
 ## App/UI
@@ -77,6 +85,14 @@ Response-item (kort):
 ### `GET /tasks/:taskId`
 Detaljvy för expanderat kort.
 
+### `POST /tasks`
+Skapa manuell uppgift för barnets vuxenflöde.
+
+Regel:
+- endast parent
+- används av frontend för manuellt skapade uppgifter
+- sätter `source='manual'` och samma task-form som övriga listvyer
+
 ### Mutation response shapes and frontend refresh behavior
 Current SQLite MVP mutation responses are intentionally small and stable:
 - `POST /agent/tasks` returns the created task row with status `received`, or the existing task row for the idempotent `source + source_external_id` case. It does not currently add `can_actions` to this mutation response; frontend should refetch `GET /tasks?child_user_id=...` or `GET /tasks/:taskId` when it needs hint-enriched state.
@@ -86,6 +102,16 @@ Current SQLite MVP mutation responses are intentionally small and stable:
 - `POST /tasks/:taskId/reject` returns `{ "ok": true }`; frontend should refetch task detail/list, progress, events only if needed for diagnostics, and `GET /children/:childUserId/animations/pending` for one-shot reject feedback.
 - `POST /tasks/:taskId/comments` returns the created comment row; frontend can append it locally or refetch `GET /tasks/:taskId/comments`.
 - `POST /children/:childUserId/animations/:animationId/ack` returns `{ acknowledged, seen_at }`; after `acknowledged: true`, the same animation will not appear in pending animations.
+
+### Current frontend usage map
+The current React frontend uses the task APIs as follows:
+- `GET /tasks?child_user_id=...` for the main list in both child and parent views
+- `GET /tasks/:taskId` for task details
+- `POST /tasks` for parent-created manual tasks
+- `PATCH /tasks/:taskId/planning`, `PATCH /tasks/:taskId/status`, `POST /tasks/:taskId/comments`, `POST /tasks/:taskId/collect_reward`, `POST /tasks/:taskId/reject`
+- `GET /children/:childUserId/progress`, `GET /children/:childUserId/animations/pending`, and `POST /children/:childUserId/animations/:animationId/ack` for topbar/reject-feedback state
+
+`/agent/tasks` is implemented and tested in backend/API helpers, but it is not currently called from the React frontend.
 
 ### `PATCH /tasks/:taskId/planning`
 Barn sätter svårighet + planering.
@@ -147,7 +173,7 @@ Body:
 ```
 
 Side effects:
-- status tillbaka till `started`
+- status tillbaka till `started` i nuvarande backend-implementation
 - avsluta aktuell attempt som `rejected`
 - illamående ökar
 - visuell feedback-flagga för "fel-animation" markeras som osedd (ska kunna spelas exakt en gång i UI)

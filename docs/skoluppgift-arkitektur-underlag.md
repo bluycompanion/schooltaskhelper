@@ -165,6 +165,14 @@ Valfritt:
 Svar:
 - `201 created` eller `200 existing` vid idempotent träff.
 
+### `GET /agent/tasks`
+Lista uppgifter för agent/system i ett datumfönster.
+
+Regel:
+- endast `x-role: agent`
+- stödjer filter på `child_user_id`, `due_from` och `due_to`
+- sorterar på deadline och skapad tid
+
 ### `POST /agent/tasks/:taskId/status`
 Agent ändrar status (inkl. `confirmed_done`).
 
@@ -187,6 +195,7 @@ Body:
 
 Regel:
 - Skapar `confirmation_rejected` + negativ liten påverkan + stänger attempt.
+- Nuvarande backend återöppnar alltid till `started`; `reopen_to_status` finns som kontraktsfält men styr inte ett annat återöppningsläge ännu.
 
 ## B) App API (UI)
 
@@ -195,6 +204,14 @@ Hämtar aktuella uppgifter (v1: ingen historiklista i UI, men API kan returnera 
 
 ### `GET /tasks/:taskId`
 Detaljer för uppgift.
+
+### `POST /tasks`
+Skapa manuell uppgift från föräldervyn.
+
+Regel:
+- endast förälder
+- sätts som `source=manual`
+- frontend använder detta för manuella uppgifter som skapas direkt i appen
 
 ### `PATCH /tasks/:taskId/status`
 Barn/förälder ändrar status enligt rollregler.
