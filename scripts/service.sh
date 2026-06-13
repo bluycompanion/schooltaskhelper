@@ -37,7 +37,7 @@ run_prod_launchctl() {
   if [[ "$(id -un)" == "root" ]]; then
     launchctl "$@"
   else
-    sudo -n launchctl "$@"
+    sudo -n /bin/launchctl "$@"
   fi
 }
 

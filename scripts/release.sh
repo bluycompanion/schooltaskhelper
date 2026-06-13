@@ -22,7 +22,7 @@ NEW_RELEASE="$RELEASES_DIR/$TS"
 
 mkdir -p "$RELEASES_DIR"
 echo "[release] building frontend for /schooltaskhelper"
-(cd "$DEV_DIR" && VITE_BASE_PATH=/schooltaskhelper npm run build:web)
+(cd "$DEV_DIR" && npm run build:web:prod)
 rsync -a --delete \
   --exclude '.git' \
   --exclude 'node_modules' \

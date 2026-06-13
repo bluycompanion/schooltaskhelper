@@ -10,7 +10,10 @@
     "start": "node server.js",
     "dev:web": "vite --host 127.0.0.1",
     "seed:dev": "node scripts/seed_dev_data.js",
-    "build:web": "vite build",
+    "build:web:raw": "vite build",
+    "build:web": "bash scripts/build-web.sh \"${VITE_BASE_PATH:?Use build:web:dev or build:web:prod}\"",
+    "build:web:dev": "bash scripts/build-web.sh /dev/schooltaskhelper",
+    "build:web:prod": "bash scripts/build-web.sh /schooltaskhelper",
     "typecheck:web": "tsc -b tsconfig.json",
     "test:web": "tsc -p apps/web/tsconfig.node-test.json && node -e \"const { spawnSync } = require('child_process'); const p = require('path').resolve('node_modules/.tmp/web-tests/api/apiClient.test.js'); process.exit(spawnSync('node', ['--test', p], { stdio: 'inherit' }).status);\"",
     "test": "node --test tests/integration.test.js"

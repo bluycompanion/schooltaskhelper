@@ -23,10 +23,22 @@ npm run typecheck:web
 "$BASE_DIR/scripts/service.sh" restart prod
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
   if curl -fsS http://127.0.0.1:4320/health >/dev/null; then
-    echo "[deploy-prod] PASS"
-    exit 0
+    echo "[deploy-prod] health endpoint is responding"
+    break
   fi
   sleep 1
 done
-echo "[deploy-prod] FAIL health endpoint did not respond on port 4320" >&2
-exit 1
+
+EXPECTED_BUILD_INFO="/Users/Shared/dev/runtime/schooltaskhelper/current/dist/web/build-info.json"
+if [[ ! -f "$EXPECTED_BUILD_INFO" ]]; then
+  echo "[deploy-prod] FAIL missing build metadata: $EXPECTED_BUILD_INFO" >&2
+  exit 1
+fi
+
+python3 "$BASE_DIR/scripts/verify-live-release.py" \
+  --base-path /schooltaskhelper \
+  --expected-build-info "$EXPECTED_BUILD_INFO" \
+  --health-url http://127.0.0.1:4320/health \
+  --page-url http://127.0.0.1:4320/
+
+echo "[deploy-prod] PASS"

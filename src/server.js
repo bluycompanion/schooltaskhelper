@@ -8,9 +8,15 @@ runMigrations(db);
 const app = createApp(db);
 const distWebDir = path.join(__dirname, '..', 'dist', 'web');
 const hasFrontendBuild = fs.existsSync(path.join(distWebDir, 'index.html'));
+const buildInfo = readBuildInfo(distWebDir);
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, frontend: hasFrontendBuild, timestamp: new Date().toISOString() });
+  res.json({
+    ok: true,
+    frontend: hasFrontendBuild,
+    build: buildInfo,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 if (hasFrontendBuild) {
@@ -34,4 +40,17 @@ app.listen(port, () => {
 function expressStaticMiddleware(rootDir) {
   const express = require('express');
   return express.static(rootDir, { index: false });
+}
+
+function readBuildInfo(distDir) {
+  const file = path.join(distDir, 'build-info.json');
+  try {
+    if (!fs.existsSync(file)) return null;
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch (error) {
+    console.warn('Failed to read build-info.json', error);
+    return null;
+  }
 }

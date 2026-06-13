@@ -445,8 +445,18 @@ h3 {
   margin: 0;
 }
 
+.buildFooter {
+  margin: 1rem 0 0;
+  padding: 0 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-align: center;
+  opacity: 0.9;
+  user-select: text;
+}
+
 /* =========================================
-   Task List + Cards
+   Decorative Screens
    ========================================= */
 .taskList {
   display: grid;

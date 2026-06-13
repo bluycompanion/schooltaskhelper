@@ -17,6 +17,7 @@ import {
   type TaskSummary,
 } from './api/apiClient';
 import { getApiBaseUrl, getLocalViewContext, isLocalDevMode } from './config';
+import { buildInfoLabel } from './buildInfo';
 import './styles.css';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1018,6 +1019,8 @@ export default function App() {
           <h2>{levelUpText}</h2>
         </div>
       ) : null}
+
+      <p className="buildFooter" aria-label="Bygginformation">{buildInfoLabel()}</p>
 
     </main>
   );
