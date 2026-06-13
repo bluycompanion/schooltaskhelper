@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   SchoolTaskApiClient,
   buildViewHref,
@@ -247,6 +248,17 @@ export default function App() {
   const [newTaskSaving, setNewTaskSaving] = useState(false);
   const [newTaskError, setNewTaskError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!activePopup) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActivePopup(null);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activePopup]);
+
   // Dev toggle: turn off card pulse + shimmer (persisted locally for testing).
   const [animationsOff, setAnimationsOff] = useState<boolean>(() => {
     try { return localStorage.getItem('sth_animations_off') === '1'; } catch { return false; }
@@ -258,6 +270,7 @@ export default function App() {
       return next;
     });
   }, []);
+
 
   // ─── Data loading ───────────────────────────────────────────────────────────
 
@@ -871,35 +884,46 @@ export default function App() {
                 {cardErrors[task.id] ? <p className="errorText" role="alert">{cardErrors[task.id]}</p> : null}
 
                 {/* ── Popup ── */}
-                {activePopup?.taskId === task.id ? (
-                  <div className="actionPopupBackdrop" onClick={() => setActivePopup(null)}>
-                    <div className="actionPopup" onClick={(e) => e.stopPropagation()}>
-                      <h3>
-                        {activePopup.type === 'difficulty' ? 'Hur svår känns den?'
-                          : activePopup.type === 'planning' ? 'När tänker du jobba med den?'
-                          : 'Ändra status'}
-                      </h3>
-                      <div className="popupButtons">
-                        {activePopup.type === 'difficulty' && (['easy', 'medium', 'hard'] as Difficulty[]).map((value) => (
-                          <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'difficulty', value, e)}>
-                            {difficultyLabel[value]}
-                          </button>
-                        ))}
-                        {activePopup.type === 'planning' && (['today', 'tomorrow', 'this_week', 'next_week'] as PlannedWindow[]).map((value) => (
-                          <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'planning', value, e)}>
-                            {planningLabel[value]}
-                          </button>
-                        ))}
-                        {activePopup.type === 'status' && (['received', 'started', 'thinks_done', 'confirmed_done']).map((value) => (
-                          <button key={value} className="secondary" type="button" onClick={(e) => saveStatusPopup(task, value, e)}>
-                            {statusLabel[value]}
-                          </button>
-                        ))}
-                      </div>
-                      <button className="secondary popupClose" type="button" onClick={() => setActivePopup(null)}>Avbryt</button>
-                    </div>
-                  </div>
-                ) : null}
+                {activePopup?.taskId === task.id
+                  ? typeof document !== 'undefined'
+                    ? createPortal(
+                        <div className="actionPopupBackdrop" onClick={() => setActivePopup(null)}>
+                          <div
+                            className="actionPopup"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby={`action-popup-title-${task.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <h3 id={`action-popup-title-${task.id}`}>
+                              {activePopup.type === 'difficulty' ? 'Hur svår känns den?'
+                                : activePopup.type === 'planning' ? 'När tänker du jobba med den?'
+                                : 'Ändra status'}
+                            </h3>
+                            <div className="popupButtons">
+                              {activePopup.type === 'difficulty' && (['easy', 'medium', 'hard'] as Difficulty[]).map((value) => (
+                                <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'difficulty', value, e)}>
+                                  {difficultyLabel[value]}
+                                </button>
+                              ))}
+                              {activePopup.type === 'planning' && (['today', 'tomorrow', 'this_week', 'next_week'] as PlannedWindow[]).map((value) => (
+                                <button key={value} className="secondary" type="button" onClick={(e) => savePlanningPopup(task, 'planning', value, e)}>
+                                  {planningLabel[value]}
+                                </button>
+                              ))}
+                              {activePopup.type === 'status' && (['received', 'started', 'thinks_done', 'confirmed_done']).map((value) => (
+                                <button key={value} className="secondary" type="button" onClick={(e) => saveStatusPopup(task, value, e)}>
+                                  {statusLabel[value]}
+                                </button>
+                              ))}
+                            </div>
+                            <button className="secondary popupClose" type="button" onClick={() => setActivePopup(null)}>Avbryt</button>
+                          </div>
+                        </div>,
+                        document.body,
+                      )
+                    : null
+                  : null}
 
                 {/* ── Expanded details ── */}
                 {expanded ? (

@@ -849,12 +849,13 @@ textarea {
 .actionPopupBackdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: transparent;
   z-index: 1000;
   display: flex;
   justify-content: center;
   align-items: center;
   padding: 1rem;
+  overflow-y: auto;
 }
 
 .actionPopup {
@@ -862,8 +863,10 @@ textarea {
   border: 1px solid var(--bg-card-border);
   border-radius: 24px;
   padding: 1.5rem;
-  width: 100%;
+  width: min(100%, 360px);
   max-width: 360px;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
   box-shadow: var(--card-shadow);
   animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
@@ -1077,8 +1080,18 @@ textarea {
   .taskCardHeader { padding-right: 2.5rem; }
 
   .expandButton {
-    top: -0.25rem;
-    right: -0.25rem;
+    top: 0;
+    right: 0;
+  }
+
+  .cardControlRow .actions {
+    flex: 1 0 100%;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .checklistChips {
+    flex-wrap: wrap;
   }
 
   .actions button,
