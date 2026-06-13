@@ -14,6 +14,7 @@
   - prod restart + health-check ✅
 - Körde även ett publikt prod-smoketest med Basic Auth; `https://bluycompanion.duckdns.org/schooltaskhelper/` svarade `200` och levererade HTML med titeln `SchoolTaskHelper`.
 - Installerade även käll-plisten i `/Users/Shared/dev/ops/webhosting/launchd/com.webhosting.schooltaskhelper.prod.plist` så att launchd-setupen finns dokumenterad i shared ops.
+- Dev-route lärdom: en vit sida berodde på en stale dev-build som pekade på root-assets (`/assets/...`) i stället för `/dev/schooltaskhelper/assets/...`; ombyggnad med `VITE_BASE_PATH=/dev/schooltaskhelper npm run build:web` löste det och asset-URL:erna svarar 200.
 
 ## 2026-05-01
 - Initialized project skeleton at `/Users/Shared/dev/projects/schooltaskhelper`.
