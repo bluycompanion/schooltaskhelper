@@ -1,5 +1,20 @@
 # ACTION_LOG
 
+## 2026-06-13
+- Fick prod-deployen att fungera för Hermes genom att:
+  - göra `/Users/Shared/dev/runtime/schooltaskhelper` och `releases` gruppskrivbara för `homelab`
+  - flytta prod till system LaunchDaemon `system/com.webhosting.schooltaskhelper.prod`
+  - installera system-plisten i `/Library/LaunchDaemons/com.webhosting.schooltaskhelper.prod.plist`
+  - lägga till `scripts/rebuild-native-modules.sh` som standard hook och använda den före teststeget i `scripts/deploy-prod.sh`
+- Verifierade full `./scripts/deploy-prod.sh --approve` som `hermes`:
+  - `npm test` ✅
+  - `npm run test:web` ✅
+  - `npm run typecheck:web` ✅
+  - prod build/release ✅
+  - prod restart + health-check ✅
+- Körde även ett publikt prod-smoketest med Basic Auth; `https://bluycompanion.duckdns.org/schooltaskhelper/` svarade `200` och levererade HTML med titeln `SchoolTaskHelper`.
+- Installerade även käll-plisten i `/Users/Shared/dev/ops/webhosting/launchd/com.webhosting.schooltaskhelper.prod.plist` så att launchd-setupen finns dokumenterad i shared ops.
+
 ## 2026-05-01
 - Initialized project skeleton at `/Users/Shared/dev/projects/schooltaskhelper`.
 - Added base docs: README, AGENTS, ENVIRONMENTS, DECISIONS, ACTION_LOG.
@@ -96,7 +111,7 @@
 - Bekräftade att lokala dev-hälsan svarar på `http://127.0.0.1:4321/health` och att public dev-route finns bakom Caddy-auth på `https://bluycompanion.duckdns.org/dev/schooltaskhelper/`.
 - Synkade API-kontrakt och arkitekturunderlag med faktisk implementation: `POST /tasks` finns för parent-manual tasks, `GET /agent/tasks` finns för agent-listning, frontend använder fortfarande `/tasks` som huvudflöde, och `POST /tasks/:taskId/reject` återöppnar i nuvarande backend alltid till `started`.
 - Barnvyns svårighets-/planeringspopup flyttades till portal ovanpå kortet, fick Esc-stängning och transparent overlay; mobilens action-rad får nu full bredd när den bryter under chipsen.
-- Försökte prod-deploya med `./scripts/deploy-prod.sh --approve`, men release-steget blockerades av skrivbehörigheter: `/Users/Shared/dev/runtime/schooltaskhelper/releases` ägs av `openclaw` och sessionen saknar lösenordslös sudo till den användaren. Prod-läget är därför fortfarande på föregående release tills runtime-behörigheten/owner-vägen är löst.
+- Försökte prod-deploya med `./scripts/deploy-prod.sh --approve`, men release-steget blockerades initialt av skrivbehörigheter: `/Users/Shared/dev/runtime/schooltaskhelper/releases` ägdes av `openclaw` utan gruppskriv för `homelab`. Runtime-trädet är nu gruppskrivbart för `homelab` och Hermes/OpenClaw ska kunna skapa nya releases och uppdatera `current` utan samma `mkpath`-fel.
 
 ## 2026-06-12
 - Synkade lokal `main` med GitHub `origin/main`; lokal checkout var 2 commits bakom och fast-forwardades till `50fc5cf`.

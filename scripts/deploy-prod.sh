@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+CURRENT_USER="$(id -un)"
+USER_HOME="$(dscl . -read "/Users/$CURRENT_USER" NFSHomeDirectory | awk '{print $2}')"
+export HOME="${USER_HOME:-$HOME}"
+export npm_config_cache="$HOME/.npm"
+
 APPROVE_FLAG="${1:-}"
 if [[ "$APPROVE_FLAG" != "--approve" ]]; then
   echo "Deploy blocked. Run: $0 --approve" >&2
@@ -8,7 +13,9 @@ if [[ "$APPROVE_FLAG" != "--approve" ]]; then
 fi
 
 BASE_DIR="/Users/Shared/dev/projects/schooltaskhelper"
+cd "$BASE_DIR"
 "$BASE_DIR/scripts/preflight.sh" dev
+"$BASE_DIR/scripts/rebuild-native-modules.sh"
 npm test
 npm run test:web
 npm run typecheck:web

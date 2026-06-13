@@ -22,7 +22,7 @@ if [[ "$ENV_NAME" == "dev" ]]; then
   PLIST="$PLIST_DIR/$LABEL.plist"
 else
   LABEL="com.webhosting.schooltaskhelper.prod"
-  PLIST="$USER_PLIST_DIR/$LABEL.plist"
+  PLIST="/Library/LaunchDaemons/$LABEL.plist"
 fi
 
 run_dev_launchctl() {
@@ -34,7 +34,11 @@ run_dev_launchctl() {
 }
 
 run_prod_launchctl() {
-  launchctl "$@"
+  if [[ "$(id -un)" == "root" ]]; then
+    launchctl "$@"
+  else
+    sudo -n launchctl "$@"
+  fi
 }
 
 print_compact_status() {
@@ -52,7 +56,7 @@ case "$ACTION" in
     if [[ "$ENV_NAME" == "dev" ]]; then
       run_dev_launchctl print "gui/$UID_JADMIN/$LABEL"
     else
-      run_prod_launchctl print "user/$(id -u)/$LABEL"
+      run_prod_launchctl print "system/$LABEL"
     fi
     ;;
   restart)
@@ -60,12 +64,12 @@ case "$ACTION" in
       run_dev_launchctl kickstart -k "gui/$UID_JADMIN/$LABEL"
       run_dev_launchctl print "gui/$UID_JADMIN/$LABEL" | print_compact_status
     else
-      run_prod_launchctl kickstart -k "user/$(id -u)/$LABEL" 2>/dev/null || {
+      run_prod_launchctl kickstart -k "system/$LABEL" 2>/dev/null || {
         [[ -f "$PLIST" ]] || { echo "Missing prod plist: $PLIST" >&2; exit 1; }
-        run_prod_launchctl bootstrap "user/$(id -u)" "$PLIST"
-        run_prod_launchctl kickstart -k "user/$(id -u)/$LABEL"
+        run_prod_launchctl bootstrap system "$PLIST"
+        run_prod_launchctl kickstart -k "system/$LABEL"
       }
-      run_prod_launchctl print "user/$(id -u)/$LABEL" | print_compact_status
+      run_prod_launchctl print "system/$LABEL" | print_compact_status
     fi
     ;;
   start)
@@ -76,20 +80,20 @@ case "$ACTION" in
       run_dev_launchctl print "gui/$UID_JADMIN/$LABEL" | print_compact_status
     else
       [[ -f "$PLIST" ]] || { echo "Missing prod plist: $PLIST" >&2; exit 1; }
-      run_prod_launchctl bootout "user/$(id -u)/$LABEL" 2>/dev/null || true
-      run_prod_launchctl kickstart -k "user/$(id -u)/$LABEL" 2>/dev/null || {
+      run_prod_launchctl bootout "system/$LABEL" 2>/dev/null || true
+      run_prod_launchctl kickstart -k "system/$LABEL" 2>/dev/null || {
         [[ -f "$PLIST" ]] || { echo "Missing prod plist: $PLIST" >&2; exit 1; }
-        run_prod_launchctl bootstrap "user/$(id -u)" "$PLIST"
-        run_prod_launchctl kickstart -k "user/$(id -u)/$LABEL"
+        run_prod_launchctl bootstrap system "$PLIST"
+        run_prod_launchctl kickstart -k "system/$LABEL"
       }
-      run_prod_launchctl print "user/$(id -u)/$LABEL" | print_compact_status
+      run_prod_launchctl print "system/$LABEL" | print_compact_status
     fi
     ;;
   stop)
     if [[ "$ENV_NAME" == "dev" ]]; then
       run_dev_launchctl bootout "gui/$UID_JADMIN/$LABEL"
     else
-      run_prod_launchctl bootout "user/$(id -u)/$LABEL"
+      run_prod_launchctl bootout "system/$LABEL"
     fi
     ;;
   *) echo "Usage: $0 [status|restart|start|stop] [dev|prod]" >&2; exit 2 ;;

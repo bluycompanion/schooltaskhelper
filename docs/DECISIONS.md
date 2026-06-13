@@ -31,7 +31,9 @@
 - Backend event/audit-baseline är i scope för v1-spårbarhet, men synlig historik-UI är out of scope.
 - Reject-/feedback-animationer ska ha både `delivered_at` och `seen_at` så UI kan skilja leverans från faktisk visning/ack och spela varje händelse högst en gång.
 - Production deploy kräver explicit JW-godkännande.
-- Prod-deploy är för närvarande blockerad av runtime-behörigheter: `/Users/Shared/dev/runtime/schooltaskhelper/releases` ägs av `openclaw`, och Hermes-sessionen saknar lösenordslös sudo till den användaren.
+- Prod-deploy kör nu som system LaunchDaemon `system/com.webhosting.schooltaskhelper.prod`.
+- Runtime-trädet `/Users/Shared/dev/runtime/schooltaskhelper` och `releases` är gruppskrivbara för `homelab`, så både Hermes och OpenClaw kan skapa releases och uppdatera `current`.
+- Hermes deploys kör `npm rebuild better-sqlite3` innan tester för att aligna native modulen med aktuell Node-ABI.
 
 ## 2026-05-26
 - **UI/UX Refinement (Gamification & Kompakthet):**

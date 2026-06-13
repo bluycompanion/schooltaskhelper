@@ -28,4 +28,8 @@ Status: Approved by JW and deployed 2026-06-13.
 - Route: Caddy `handle_path /schooltaskhelper*` → `127.0.0.1:4320`
 - Build base path: `VITE_BASE_PATH=/schooltaskhelper`
 - Current runtime: `/Users/Shared/dev/runtime/schooltaskhelper/current`
-- Current caveat: this first prod process was started directly via `nohup` + `/Users/Shared/dev/logs/schooltaskhelper/prod.pid` because this Telegram/OpenClaw session could not install or bootstrap a system/user launchd service without sudo/root. Convert to a proper LaunchDaemon when elevated access is available.
+- Prod service: system LaunchDaemon `system/com.webhosting.schooltaskhelper.prod`
+- LaunchDaemon plist: `/Library/LaunchDaemons/com.webhosting.schooltaskhelper.prod.plist`
+- Source plist: `/Users/Shared/dev/ops/webhosting/launchd/com.webhosting.schooltaskhelper.prod.plist`
+- Note: Hermes deploys now rebuild `better-sqlite3` before tests when the active Node ABI differs from the local dev tree.
+- Smoke test: authenticated request to the public prod URL returns HTTP 200 and the `SchoolTaskHelper` HTML shell.
