@@ -96,6 +96,7 @@
 - Bekräftade att lokala dev-hälsan svarar på `http://127.0.0.1:4321/health` och att public dev-route finns bakom Caddy-auth på `https://bluycompanion.duckdns.org/dev/schooltaskhelper/`.
 - Synkade API-kontrakt och arkitekturunderlag med faktisk implementation: `POST /tasks` finns för parent-manual tasks, `GET /agent/tasks` finns för agent-listning, frontend använder fortfarande `/tasks` som huvudflöde, och `POST /tasks/:taskId/reject` återöppnar i nuvarande backend alltid till `started`.
 - Barnvyns svårighets-/planeringspopup flyttades till portal ovanpå kortet, fick Esc-stängning och transparent overlay; mobilens action-rad får nu full bredd när den bryter under chipsen.
+- Försökte prod-deploya med `./scripts/deploy-prod.sh --approve`, men release-steget blockerades av skrivbehörigheter: `/Users/Shared/dev/runtime/schooltaskhelper/releases` ägs av `openclaw` och sessionen saknar lösenordslös sudo till den användaren. Prod-läget är därför fortfarande på föregående release tills runtime-behörigheten/owner-vägen är löst.
 
 ## 2026-06-12
 - Synkade lokal `main` med GitHub `origin/main`; lokal checkout var 2 commits bakom och fast-forwardades till `50fc5cf`.

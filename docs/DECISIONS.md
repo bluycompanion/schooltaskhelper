@@ -30,7 +30,8 @@
 - `can_actions` Ã¤r en roll-/statusnÃ¤ra UI-hint i plain language, inte auktorisation. Backendens muterande endpoints fortsÃ¤tter vara auktoritativa fÃ¶r tillÃ¥tna roll/status-Ã¶vergÃ¥ngar.
 - Backend event/audit-baseline Ã¤r i scope fÃ¶r v1-spÃ¥rbarhet, men synlig historik-UI Ã¤r out of scope.
 - Reject-/feedback-animationer ska ha bÃ¥de `delivered_at` och `seen_at` sÃ¥ UI kan skilja leverans frÃ¥n faktisk visning/ack och spela varje hÃ¤ndelse hÃ¶gst en gÃ¥ng.
-- Production deploy krÃ¤ver explicit JW-godkÃ¤nnande och Ã¤r inte godkÃ¤nd i nuvarande dokumentationsuppdatering.
+- Production deploy krÃ¤ver explicit JW-godkÃ¤nnande.
+- Prod-deploy Ã¤r fÃ¶r nÃ¤rvarande blockerad av runtime-behÃ¶righeter: `/Users/Shared/dev/runtime/schooltaskhelper/releases` Ã¤gs av `openclaw`, och Hermes-sessionen saknar lÃ¶senordslÃ¶s sudo till den anvÃ¤ndaren.
 
 ## 2026-05-26
 - **UI/UX Refinement (Gamification & Kompakthet):**
@@ -43,8 +44,8 @@
   - **Kommentarer:** Minimeras och dÃ¶ljs bakom ett knapptryck (t.ex. en penna) inne i den expanderade vyn fÃ¶r att undvika onÃ¶dig platsbrist.
 
 ### Ultraminimalistiskt Uppgiftskort (2026-05-26)
-- **Liten meta-text:** Stora bubblor/chips togs bort till förmån för en liten textrad med fetstilta värden (.subMetaLine).
-- **Kompakta listor:** Kommentarer flyttades in inline i loggen/tidslinjen. Tidslinjen renderas i omvänd kronologisk ordning med datum och händelse på samma rad för att spara vertikal yta.
-- **Små åtgärdsknappar:** I den expanderade vyn lades en rad med mycket små knappar till (.tinyActions) för att manuellt ändra svårighet, plan och status. Statusval kan nu göras via popup-fönster precis som de andra valen.
-- **Fast pil-ikon:** Expanderings-ikonen låstes (position: absolute) i översta högra hörnet för att undvika brytningar.
-- **Källa flyttad:** Visning av datakälla flyttades till att vara det allra första elementet i loggen istället för en fristående rubrik.
+- **Liten meta-text:** Stora bubblor/chips togs bort till fï¿½rmï¿½n fï¿½r en liten textrad med fetstilta vï¿½rden (.subMetaLine).
+- **Kompakta listor:** Kommentarer flyttades in inline i loggen/tidslinjen. Tidslinjen renderas i omvï¿½nd kronologisk ordning med datum och hï¿½ndelse pï¿½ samma rad fï¿½r att spara vertikal yta.
+- **Smï¿½ ï¿½tgï¿½rdsknappar:** I den expanderade vyn lades en rad med mycket smï¿½ knappar till (.tinyActions) fï¿½r att manuellt ï¿½ndra svï¿½righet, plan och status. Statusval kan nu gï¿½ras via popup-fï¿½nster precis som de andra valen.
+- **Fast pil-ikon:** Expanderings-ikonen lï¿½stes (position: absolute) i ï¿½versta hï¿½gra hï¿½rnet fï¿½r att undvika brytningar.
+- **Kï¿½lla flyttad:** Visning av datakï¿½lla flyttades till att vara det allra fï¿½rsta elementet i loggen istï¿½llet fï¿½r en fristï¿½ende rubrik.
