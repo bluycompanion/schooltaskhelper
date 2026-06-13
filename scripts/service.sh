@@ -2,20 +2,38 @@
 set -euo pipefail
 
 ACTION="${1:-status}"
-LABEL="com.webhosting.schooltaskhelper.dev"
-DOMAIN="gui/$(id -u)"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-
-usage() {
-  echo "Usage: $0 [status|restart|start|stop]" >&2
-}
+ENV_NAME="${2:-dev}"
+UID_JADMIN=501
+PLIST_DIR="/Users/Shared/dev/ops/webhosting/launchd"
+USER_PLIST_DIR="$HOME/Library/LaunchAgents"
 
 if [[ "$ACTION" != "status" && "$ACTION" != "restart" && "$ACTION" != "start" && "$ACTION" != "stop" ]]; then
-  usage
+  echo "Usage: $0 [status|restart|start|stop] [dev|prod]" >&2
   exit 2
 fi
 
-run_launchctl() {
+if [[ "$ENV_NAME" != "dev" && "$ENV_NAME" != "prod" ]]; then
+  echo "Usage: $0 [status|restart|start|stop] [dev|prod]" >&2
+  exit 2
+fi
+
+if [[ "$ENV_NAME" == "dev" ]]; then
+  LABEL="com.webhosting.schooltaskhelper.dev"
+  PLIST="$PLIST_DIR/$LABEL.plist"
+else
+  LABEL="com.webhosting.schooltaskhelper.prod"
+  PLIST="$USER_PLIST_DIR/$LABEL.plist"
+fi
+
+run_dev_launchctl() {
+  if [[ "$(id -un)" == "jadmin" ]]; then
+    launchctl "$@"
+  else
+    sudo -n -u jadmin -H launchctl "$@"
+  fi
+}
+
+run_prod_launchctl() {
   launchctl "$@"
 }
 
@@ -31,21 +49,48 @@ print_compact_status() {
 
 case "$ACTION" in
   status)
-    run_launchctl print "$DOMAIN/$LABEL" | print_compact_status
+    if [[ "$ENV_NAME" == "dev" ]]; then
+      run_dev_launchctl print "gui/$UID_JADMIN/$LABEL"
+    else
+      run_prod_launchctl print "user/$(id -u)/$LABEL"
+    fi
     ;;
   restart)
-    run_launchctl kickstart -k "$DOMAIN/$LABEL"
-    run_launchctl print "$DOMAIN/$LABEL" | print_compact_status
+    if [[ "$ENV_NAME" == "dev" ]]; then
+      run_dev_launchctl kickstart -k "gui/$UID_JADMIN/$LABEL"
+      run_dev_launchctl print "gui/$UID_JADMIN/$LABEL" | print_compact_status
+    else
+      run_prod_launchctl kickstart -k "user/$(id -u)/$LABEL" 2>/dev/null || {
+        [[ -f "$PLIST" ]] || { echo "Missing prod plist: $PLIST" >&2; exit 1; }
+        run_prod_launchctl bootstrap "user/$(id -u)" "$PLIST"
+        run_prod_launchctl kickstart -k "user/$(id -u)/$LABEL"
+      }
+      run_prod_launchctl print "user/$(id -u)/$LABEL" | print_compact_status
+    fi
     ;;
   start)
-    [[ -f "$PLIST" ]] || { echo "Missing LaunchAgent plist: $PLIST" >&2; exit 1; }
-    run_launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-    run_launchctl bootstrap "$DOMAIN" "$PLIST"
-    run_launchctl enable "$DOMAIN/$LABEL"
-    run_launchctl kickstart -k "$DOMAIN/$LABEL"
-    run_launchctl print "$DOMAIN/$LABEL" | print_compact_status
+    if [[ "$ENV_NAME" == "dev" ]]; then
+      run_dev_launchctl bootout "gui/$UID_JADMIN/$LABEL" 2>/dev/null || true
+      run_dev_launchctl bootstrap "gui/$UID_JADMIN" "$PLIST"
+      run_dev_launchctl kickstart -k "gui/$UID_JADMIN/$LABEL"
+      run_dev_launchctl print "gui/$UID_JADMIN/$LABEL" | print_compact_status
+    else
+      [[ -f "$PLIST" ]] || { echo "Missing prod plist: $PLIST" >&2; exit 1; }
+      run_prod_launchctl bootout "user/$(id -u)/$LABEL" 2>/dev/null || true
+      run_prod_launchctl kickstart -k "user/$(id -u)/$LABEL" 2>/dev/null || {
+        [[ -f "$PLIST" ]] || { echo "Missing prod plist: $PLIST" >&2; exit 1; }
+        run_prod_launchctl bootstrap "user/$(id -u)" "$PLIST"
+        run_prod_launchctl kickstart -k "user/$(id -u)/$LABEL"
+      }
+      run_prod_launchctl print "user/$(id -u)/$LABEL" | print_compact_status
+    fi
     ;;
   stop)
-    run_launchctl bootout "$DOMAIN/$LABEL"
+    if [[ "$ENV_NAME" == "dev" ]]; then
+      run_dev_launchctl bootout "gui/$UID_JADMIN/$LABEL"
+    else
+      run_prod_launchctl bootout "user/$(id -u)/$LABEL"
+    fi
     ;;
+  *) echo "Usage: $0 [status|restart|start|stop] [dev|prod]" >&2; exit 2 ;;
 esac
