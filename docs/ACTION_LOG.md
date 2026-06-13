@@ -102,3 +102,20 @@
 - Lade till `docs/NEXT_AGENT_HANDOFF_2026-06-12.md` med sammanfattning av GitHub-synken, verifierad baseline och varning om lokala ocommittade ändringar som inte ska skrivas över utan JW-beslut.
 - Uppdaterade `docs/FUTURE_ACTION_TRACKER.md` så agent-API-planen inte längre beskrivs som helt oimplementerad efter `bed74fb`.
 - Verifierade även aktuell ocommittad arbetsyta efter handoff-noteringarna: `npm.cmd test` (14/14), `npm.cmd run test:web` (6/6), `npm.cmd run typecheck:web` och `npm.cmd run build:web` passerade.
+
+## 2026-06-13
+- Slutförde gamification-overhaul (Clash Royale × Tamagotchi): mörkt vibrant CSS-variabeltema, shimmer/pulse på actionable kort+knappar, 7-stegs avatarhumör med animationer, partikelsystem (5–8 emojis i båge → avatar), två separata bars (hunger + XP), reward-flöde med guld-CTA/partikelburst/slide-out.
+- Sims-stil hungerbar: grönt fylls från vänster per delsteg, illamående-brunt äter in från höger (en task-slice/poäng), röd alert vid oplanerat, segment-ticks per task.
+- Backend: nausea härleds nu per task (attempt > 1 & ej bekräftad) och försvinner när vuxen bekräftar (ersatte 24h-decay); +2 XP planeringsbonus; `POST /tasks` för förälder-skapade uppgifter; `completed_today` i `/progress` så att slutförda tasks inte krymper baren.
+- Skrev `docs/GAMIFICATION_HANDOFF_2026-06-13.md` med fullständig överlämning: levererat arbete, aktiv bugg (primärknapp hoppar över planering, `App.tsx:761`), pedagogiska förbättringsförslag, roadmap, körinstruktioner och scope-guards.
+- Dokumenterad känd bugg att åtgärda härnäst: hopfällt kort visar "Jag har börjat" på nya tasks istället för planeringssteget först.
+- Åtgärdade nästa-steg-buggen: ny `nextStepAction`-helper väljer ett enda nästa logiskt steg (Välj svårighet → Planera tid → Jag har börjat → Jag tror jag är klar; confirm/collect/reject för respektive roll). Hopfällt kort visar bara nästa steg; expanderat visar resten (mjuk styrning, ingen hård gate).
+- Ersatte passiv subMetaLine med klickbara checklist-chips (`ChecklistChip`): ○ guld/pulserande för todo, ✓ grön med värde för klart; barn-only klickbara (öppnar popup), display-only för förälder. Trimmade tinyActions till barn-only "Ändra status".
+- La till planeringsbonus-hint ("✨ Planera klart = +2 ⭐ bonus") som visas på barnkort tills uppgiften är fullt planerad.
+- Verifierade i barn- och vuxenvy samt med typecheck:web/test:web/build:web (allt grönt).
+- Kompakthet/mobil + effekt-i-knapp + glänsande ram (iteration efter feedback):
+  - Effekt ("mat som matar baren") visas nu på nästa-steg-knappen och på ○-todo-chips: 🍊 svårighet, 🍓 planera, 🍕 börja, 🍒 tror klar (+1 vardera). 🌟+2-bonus visas på det planeringssteg som fullbordar full planering.
+  - Tog bort den separata bonus-hint-raden och gjorde chipsen mindre (font 0.72rem, tightare padding) → kompaktare och mer mobilvänligt.
+  - Partiklarna matchar nu stegens frukter för visuell konsekvens.
+  - Bytte helyte-shimmer på actionable/reward-kort mot en tunn glänsande gradient-ram (mask-composite), behöll knapp-glans och mild puls.
+  - Iteration efter feedback: dämpade shimmern ytterligare (mjuk ljusgrön glint mot dämpad grön ram istället för neon). La chips + nästa-steg-knapp på samma rad (`cardControlRow`, flex-wrap → knappen bryts ner på smal mobil) för att spara höjd. Chips nu nowrap på en rad, mindre (0.7rem). Flyttade 🌟+2-bonusen till enbart knappen (chips smalare). Minskade kort-padding (0.7/0.8rem). Responsivt/modulärt utan hårda brytpunkter.

@@ -458,7 +458,7 @@ h3 {
 
 .taskCard,
 .stateCard {
-  padding: 1rem;
+  padding: 0.7rem 0.8rem;
 }
 
 .taskCard {
@@ -467,30 +467,31 @@ h3 {
 
 /* Actionable card — shimmer border + subtle pulse */
 .taskCard--actionable {
-  border-color: #3a4a5e;
+  border-color: #33533f;
   animation: cardPulse 2.5s ease-in-out infinite;
   position: relative;
   overflow: hidden;
 }
 
+/* Shimmer is confined to a thin glowing frame, not the whole card surface.
+   The gradient fills a `padding`-wide band and a mask punches out the centre. */
 .taskCard--actionable::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(
-    110deg,
-    transparent 30%,
-    rgba(45, 206, 110, 0.08) 50%,
-    transparent 70%
-  );
+  padding: 2px;
+  background: linear-gradient(110deg, transparent 40%, rgba(150, 240, 185, 0.4) 50%, transparent 60%);
   background-size: 200% 100%;
   background-position: -200% center;
-  animation: shimmer 3s ease-in-out infinite;
+  animation: shimmer 3.5s ease-in-out infinite;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
   pointer-events: none;
 }
 
-/* Reward card — gold shimmer */
+/* Reward card — gold shimmering frame */
 .taskCard--reward {
   border-color: var(--accent-gold-dim);
   box-shadow: 0 0 20px var(--glow-gold), var(--card-shadow);
@@ -504,15 +505,14 @@ h3 {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(
-    110deg,
-    transparent 25%,
-    rgba(245, 200, 66, 0.15) 50%,
-    transparent 75%
-  );
+  padding: 3px;
+  background: linear-gradient(110deg, transparent 30%, var(--accent-gold) 50%, transparent 70%);
   background-size: 200% 100%;
   background-position: -200% center;
   animation: shimmer 1.8s ease-in-out infinite;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
   pointer-events: none;
 }
 
@@ -576,6 +576,88 @@ h3 {
   margin-top: 0.85rem;
   color: var(--text-muted);
   font-size: 0.9rem;
+}
+
+/* =========================================
+   Checklist chips (planning progress)
+   ========================================= */
+/* Chips + next-step button share one row; the button wraps below on narrow
+   screens. Modular: scales from phone to wide without fixed breakpoints. */
+.cardControlRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.cardControlRow .actions {
+  margin-top: 0;
+  margin-left: auto;
+}
+
+.checklistChips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 999px;
+  padding: 0.16rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid var(--bg-card-border);
+  background: #1a2030;
+  color: var(--text-muted);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.chip--button {
+  min-width: 0;
+  min-height: 0;
+  cursor: pointer;
+  overflow: visible;
+  transition: transform 0.12s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chip--button:hover {
+  transform: translateY(-1px);
+}
+
+.chipMark {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+/* Done: green tick, settled look */
+.chip--done {
+  border-color: var(--accent-green-dim);
+  background: #11251a;
+  color: var(--accent-green);
+}
+
+/* To-do (and clickable): nudges for attention */
+.chip--todo.chip--button {
+  border-color: var(--accent-gold-dim);
+  background: #211a08;
+  color: var(--accent-gold);
+  box-shadow: 0 0 8px var(--glow-gold);
+  animation: cardPulse 2.2s ease-in-out infinite;
+}
+
+.chip--todo.chip--button:hover {
+  box-shadow: 0 0 14px var(--glow-gold);
+}
+
+.chip--status {
+  border-style: dashed;
 }
 
 /* Reward button — the most prominent CTA */

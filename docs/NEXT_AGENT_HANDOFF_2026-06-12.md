@@ -1,3 +1,7 @@
+> **SUPERSEDED 2026-06-13:** The "dirty working tree" described in this file has since
+> been committed (`17c0859`). For the current handoff see
+> `docs/GAMIFICATION_HANDOFF_2026-06-13.md`. This file is kept for the GitHub-sync history below.
+
 # Next Agent Handoff - 2026-06-12
 
 ## Repository Sync

@@ -75,17 +75,47 @@ const sourceLabel: Record<string, string> = {
   school_platform: 'Skolplattformen', manual: 'Manuell',
 };
 
+// ─── Step "food" effect (what feeds the hunger bar) ──────────────────────────
+// Each planning/progress step lowers hunger by 1 in the backend = one bite.
+// We surface that bite as a fruit so the child sees what each step gives.
+
+const PLANNING_BONUS = 2;
+
+const stepEffect: Partial<Record<TaskActionId, { emoji: string; amount: number }>> = {
+  set_difficulty: { emoji: '🍊', amount: 1 },
+  set_planning: { emoji: '🍓', amount: 1 },
+  mark_started: { emoji: '🍕', amount: 1 },
+  mark_thinks_done: { emoji: '🍒', amount: 1 },
+};
+
+// Compact effect suffix for a button/chip, e.g. " +1🍊" or " +1🍓 🌟+2".
+// The 🌟 bonus appears on the planning step that *completes* full planning,
+// and only on the wider button (chips stay narrow → includeBonus=false).
+function effectSuffix(actionId: TaskActionId, task: TaskSummary, includeBonus = true): string {
+  const eff = stepEffect[actionId];
+  if (!eff) return '';
+  let suffix = ` +${eff.amount}${eff.emoji}`;
+  const completesPlanning =
+    (actionId === 'set_difficulty' && task.planned_window !== 'unknown')
+    || (actionId === 'set_planning' && task.difficulty !== 'unknown');
+  if (includeBonus && completesPlanning && task.status !== 'thinks_done' && task.status !== 'confirmed_done') {
+    suffix += ` 🌟+${PLANNING_BONUS}`;
+  }
+  return suffix;
+}
+
 // ─── Particle configs per action ─────────────────────────────────────────────
 
 function particlesForAction(actionId: TaskActionId | string): { emojis: string[]; bar: 'hunger' | 'xp' | 'both' | 'none' } {
   switch (actionId) {
     case 'set_difficulty':
+      return { emojis: ['🍊', '🍊', '🍋', '🍊', '🍋'], bar: 'hunger' };
     case 'set_planning':
-      return { emojis: ['🍔', '🍔', '🍟', '🍟', '🍔'], bar: 'hunger' };
+      return { emojis: ['🍓', '🍓', '🍓', '🍓', '🍓'], bar: 'hunger' };
     case 'mark_started':
       return { emojis: ['🍕', '🍕', '⚡', '🍕', '⚡'], bar: 'hunger' };
     case 'mark_thinks_done':
-      return { emojis: ['🍕', '🍕', '⭐', '🍕', '🍕', '⭐'], bar: 'both' };
+      return { emojis: ['🍒', '🍒', '⭐', '🍒', '🍒', '⭐'], bar: 'both' };
     case 'confirm_done':
       return { emojis: ['⭐', '🌟', '✨', '⭐', '🌟', '✨', '⭐'], bar: 'xp' };
     case 'collect_reward':
@@ -130,6 +160,28 @@ function nextStatusForAction(actionId: TaskActionId) {
   if (actionId === 'mark_thinks_done') return 'thinks_done';
   if (actionId === 'confirm_done') return 'confirmed_done';
   return null;
+}
+
+// The single most relevant next step for a card, following the pedagogical
+// order: choose difficulty → plan time → start → think done. Planning steps
+// are surfaced before progression so a child never skips straight to "started".
+function nextStepAction(task: TaskSummary, actions: ActionDescriptor[]): ActionDescriptor | null {
+  const byId = new Map(actions.map((a) => [a.id, a] as const));
+  const pick = (id: TaskActionId, label?: string): ActionDescriptor | null => {
+    const a = byId.get(id);
+    if (!a) return null;
+    return label ? { ...a, label } : a;
+  };
+  return (
+    pick('confirm_done')
+    || pick('collect_reward')
+    || (task.difficulty === 'unknown' ? pick('set_difficulty', 'Välj svårighet') : null)
+    || (task.planned_window === 'unknown' ? pick('set_planning', 'Planera tid') : null)
+    || pick('mark_started')
+    || pick('mark_thinks_done')
+    || pick('reject_done')
+    || null
+  );
 }
 
 function buttonSavingLabel(actionId: TaskActionId): string {
@@ -741,9 +793,6 @@ export default function App() {
                     <p className="metaLine">
                       {task.subject ?? 'Ämne saknas'} · {task.due_date ?? 'Inget datum'}
                     </p>
-                    <p className="subMetaLine">
-                      Svårighet: <strong>{difficultyLabel[task.difficulty]}</strong> · Plan: <strong>{planningLabel[task.planned_window]}</strong> · Status: <strong>{statusLabel[task.status]}</strong>
-                    </p>
                   </div>
                   <button
                     className="secondary expandButton iconButton"
@@ -756,32 +805,62 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* ── Action buttons ── */}
+                {/* ── Chips + next-step button on one row (wraps on narrow screens) ── */}
                 {(() => {
-                  const primaryActions = actions.filter((a) => a.id !== 'comment' && a.id !== 'set_difficulty' && a.id !== 'set_planning');
-                  const mainAction = primaryActions[0] ?? null;
-                  const actionsToRender = expanded ? primaryActions : (mainAction ? [mainAction] : []);
+                  const isChild = context.role === 'child';
+                  const diffDone = task.difficulty !== 'unknown';
+                  const planDone = task.planned_window !== 'unknown';
+                  const editable = isChild && task.status !== 'confirmed_done';
 
-                  return actionsToRender.length > 0 ? (
-                    <div className="actions" aria-label="Tillgängliga åtgärder">
-                      {actionsToRender.map((action) => {
-                        const saving = Boolean(savingActions[actionKey(task.id, action.id)]);
-                        const btnClass = action.id === 'collect_reward' ? 'btn-reward' : action.kind;
-                        return (
-                          <button
-                            className={btnClass}
-                            key={action.id}
-                            type="button"
-                            disabled={saving}
-                            onClick={(e) => void runAction(task, action, e)}
-                          >
-                            {saving ? buttonSavingLabel(action.id) : action.label}
-                          </button>
-                        );
-                      })}
+                  // Collapsed: only the single next logical step. Expanded: the
+                  // next step plus the remaining progression actions, so a child
+                  // can still start early (soft guidance, not a hard gate).
+                  const primary = nextStepAction(task, actions);
+                  const progression = actions.filter(
+                    (a) => a.id !== 'comment' && a.id !== 'set_difficulty' && a.id !== 'set_planning' && a.id !== primary?.id,
+                  );
+                  const actionsToRender = expanded
+                    ? [primary, ...progression].filter((a): a is ActionDescriptor => Boolean(a))
+                    : (primary ? [primary] : []);
+
+                  return (
+                    <div className="cardControlRow">
+                      <div className="checklistChips" aria-label="Planeringssteg">
+                        <ChecklistChip
+                          done={diffDone}
+                          label={diffDone ? difficultyLabel[task.difficulty] : `Svårighet${editable ? effectSuffix('set_difficulty', task, false) : ''}`}
+                          onClick={editable ? () => setActivePopup({ taskId: task.id, type: 'difficulty' }) : undefined}
+                        />
+                        <ChecklistChip
+                          done={planDone}
+                          label={planDone ? planningLabel[task.planned_window] : `Plan${editable ? effectSuffix('set_planning', task, false) : ''}`}
+                          onClick={editable ? () => setActivePopup({ taskId: task.id, type: 'planning' }) : undefined}
+                        />
+                        <span className="chip chip--status">{statusLabel[task.status]}</span>
+                      </div>
+
+                      {actionsToRender.length > 0 ? (
+                        <div className="actions" aria-label="Tillgängliga åtgärder">
+                          {actionsToRender.map((action) => {
+                            const saving = Boolean(savingActions[actionKey(task.id, action.id)]);
+                            const btnClass = action.id === 'collect_reward' ? 'btn-reward' : action.kind;
+                            return (
+                              <button
+                                className={btnClass}
+                                key={action.id}
+                                type="button"
+                                disabled={saving}
+                                onClick={(e) => void runAction(task, action, e)}
+                              >
+                                {saving ? buttonSavingLabel(action.id) : `${action.label}${effectSuffix(action.id, task)}`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="metaLine taskHelp">{taskHelpText(task, context.role)}</p>
+                      )}
                     </div>
-                  ) : (
-                    <p className="metaLine taskHelp">{taskHelpText(task, context.role)}</p>
                   );
                 })()}
 
@@ -821,11 +900,11 @@ export default function App() {
                 {/* ── Expanded details ── */}
                 {expanded ? (
                   <div className="taskDetails">
-                    <div className="tinyActions">
-                      <button className="secondary tiny" type="button" onClick={() => setActivePopup({ taskId: task.id, type: 'difficulty' })}>Ändra svårighet</button>
-                      <button className="secondary tiny" type="button" onClick={() => setActivePopup({ taskId: task.id, type: 'planning' })}>Ändra plan</button>
-                      <button className="secondary tiny" type="button" onClick={() => setActivePopup({ taskId: task.id, type: 'status' })}>Ändra status</button>
-                    </div>
+                    {context.role === 'child' && task.status !== 'confirmed_done' ? (
+                      <div className="tinyActions">
+                        <button className="secondary tiny" type="button" onClick={() => setActivePopup({ taskId: task.id, type: 'status' })}>Ändra status</button>
+                      </div>
+                    ) : null}
 
                     <section className="detailBlock timelineBlock" aria-labelledby={`log-${task.id}`}>
                       <h3 id={`log-${task.id}`}>Logg & Kommentarer</h3>
@@ -914,4 +993,21 @@ export default function App() {
 
     </main>
   );
+}
+
+function ChecklistChip({ done, label, onClick }: { done: boolean; label: string; onClick?: () => void }) {
+  const className = `chip chip--${done ? 'done' : 'todo'}`;
+  const content = (
+    <>
+      <span className="chipMark" aria-hidden="true">{done ? '✓' : '○'}</span> {label}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" className={`${className} chip--button`} onClick={onClick}>
+        {content}
+      </button>
+    );
+  }
+  return <span className={className}>{content}</span>;
 }
