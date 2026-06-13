@@ -162,12 +162,10 @@ button.danger {
   transition: border-color 0.3s;
 }
 
-.avatar--normal  { border-color: var(--accent-green-dim); }
+.avatar--glad    { border-color: var(--accent-green-dim); }
 .avatar--happy   { border-color: var(--accent-green); box-shadow: 0 0 14px var(--glow-green); animation: avatarBounce 0.5s ease 2; }
 .avatar--excited { border-color: var(--accent-gold);  box-shadow: 0 0 20px var(--glow-gold);  animation: avatarBounce 0.4s ease 4, avatarGlow 1s ease infinite; }
 .avatar--sick    { border-color: #6b4a10; animation: avatarShake 0.6s ease; }
-.avatar--busy    { border-color: #5a4a1e; animation: avatarWobble 2s ease infinite; }
-.avatar--hungry  { border-color: #8a3a3a; box-shadow: 0 0 10px rgba(224, 90, 90, 0.3); animation: avatarWobble 1.2s ease infinite; }
 .avatar--sleeping { border-color: #2a3245; opacity: 0.75; }
 
 .avatarBadge {
@@ -481,10 +479,10 @@ h3 {
   inset: 0;
   border-radius: inherit;
   padding: 2px;
-  background: linear-gradient(110deg, transparent 40%, rgba(150, 240, 185, 0.4) 50%, transparent 60%);
+  background: linear-gradient(110deg, transparent 43%, rgba(160, 245, 195, 0.22) 50%, transparent 57%);
   background-size: 200% 100%;
   background-position: -200% center;
-  animation: shimmer 3.5s ease-in-out infinite;
+  animation: shimmer 4s ease-in-out infinite;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
           mask-composite: exclude;
@@ -1088,6 +1086,22 @@ textarea {
   .detailBlock > button {
     width: 100%;
   }
+}
+
+/* Dev "calm" toggle: kill card pulse + all shimmer (avatar reactions and
+   particles intentionally stay). Hides the gradient-frame pseudo-elements. */
+.animationsOff .taskCard--actionable,
+.animationsOff .taskCard--reward,
+.animationsOff button.btn-reward,
+.animationsOff .chip--todo.chip--button {
+  animation: none !important;
+}
+
+.animationsOff .taskCard--actionable::after,
+.animationsOff .taskCard--reward::after,
+.animationsOff button.primary::after,
+.animationsOff button.btn-reward::after {
+  display: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

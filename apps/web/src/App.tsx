@@ -43,20 +43,19 @@ interface Particle {
   opacity: number;
 }
 
-type AvatarMood = 'normal' | 'happy' | 'excited' | 'sick' | 'busy' | 'hungry' | 'sleeping';
+// Avatar is glad by default and only *reacts* transiently, then returns to glad.
+type AvatarMood = 'glad' | 'happy' | 'excited' | 'sick' | 'sleeping';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const LEVEL_XP = 20;
 
 const avatarEmojis: Record<AvatarMood, string> = {
-  normal:   '🙂',
-  happy:    '😄',
-  excited:  '🤩',
-  sick:     '🤢',
-  busy:     '😮‍💨',
-  hungry:   '😫',
-  sleeping: '😴',
+  glad:     '😄', // default resting state (static)
+  happy:    '😄', // transient reaction to a good action (bounces)
+  excited:  '🤩', // level up / reward
+  sick:     '🤢', // transient reject feedback
+  sleeping: '😴', // no active tasks
 };
 
 const difficultyLabel: Record<Difficulty, string> = {
@@ -258,6 +257,18 @@ export default function App() {
   const [newTaskSaving, setNewTaskSaving] = useState(false);
   const [newTaskError, setNewTaskError] = useState<string | null>(null);
 
+  // Dev toggle: turn off card pulse + shimmer (persisted locally for testing).
+  const [animationsOff, setAnimationsOff] = useState<boolean>(() => {
+    try { return localStorage.getItem('sth_animations_off') === '1'; } catch { return false; }
+  });
+  const toggleAnimations = useCallback(() => {
+    setAnimationsOff((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('sth_animations_off', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   // ─── Data loading ───────────────────────────────────────────────────────────
 
   const loadAll = useCallback(async (isInitial = false) => {
@@ -436,13 +447,13 @@ export default function App() {
   // Sick is a short, transient state (while the reject feedback is showing).
   // The persistent nausea signal lives in the brown bar segment and the 🤢
   // badge on the rejected task card instead.
+  // Glad by default; only transient reactions (reject feedback, action bounce,
+  // level-up) override it, then it returns to glad. Sleeps only when no tasks.
   const avatarMood: AvatarMood = (() => {
     if (feedback) return 'sick';
     if (tempMood && tempMood.until > Date.now()) return tempMood.mood;
     if (state.tasks.length === 0 && !loading) return 'sleeping';
-    if (hasUnplanned) return 'hungry';
-    if (greenPercent < 40) return 'busy';
-    return 'normal';
+    return 'glad';
   })();
 
   // ─── Action handlers ────────────────────────────────────────────────────────
@@ -623,7 +634,7 @@ export default function App() {
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <main className="appShell">
+    <main className={`appShell${animationsOff ? ' animationsOff' : ''}`}>
 
       {/* ── Top panel ── */}
       <section className={`topPanel${feedback?.motion ? ' topPanel--feedback' : ''}`} aria-label="Framsteg">
@@ -674,6 +685,9 @@ export default function App() {
             <a className={context.role === 'parent' ? 'active' : ''} href={buildViewHref('parent', context.childUserId, 'parent1')}>Vuxenvy</a>
           </nav>
           <button className="secondary" type="button" onClick={() => void loadAll()}>Ladda om</button>
+          <button className="secondary" type="button" aria-pressed={animationsOff} onClick={toggleAnimations}>
+            {animationsOff ? 'Slå på puls & gläns' : 'Stäng av puls & gläns'}
+          </button>
         </section>
       ) : null}
 
