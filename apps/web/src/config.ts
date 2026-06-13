@@ -23,8 +23,12 @@ export function getApiBaseUrl(): string {
   return '';
 }
 
+// Test mode (Barnvy/Vuxenvy switch, reload, animation toggle) shows only while
+// running the Vite dev server, or when explicitly opted in with `?dev=1`. A
+// normal production build is therefore safe to share with a child — no test UI,
+// regardless of host (localhost included).
 export function isLocalDevMode(): boolean {
   if (import.meta.env.DEV) return true;
   if (typeof window === 'undefined') return false;
-  return window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+  return new URLSearchParams(window.location.search).get('dev') === '1';
 }

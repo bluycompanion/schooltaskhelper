@@ -51,8 +51,8 @@ type AvatarMood = 'glad' | 'happy' | 'excited' | 'sick' | 'sleeping';
 const LEVEL_XP = 20;
 
 const avatarEmojis: Record<AvatarMood, string> = {
-  glad:     '😄', // default resting state (static)
-  happy:    '😄', // transient reaction to a good action (bounces)
+  glad:     '😊', // default resting state — normally happy (static)
+  happy:    '😄', // very happy when fed / good action (bounces), then back to glad
   excited:  '🤩', // level up / reward
   sick:     '🤢', // transient reject feedback
   sleeping: '😴', // no active tasks
@@ -78,8 +78,6 @@ const sourceLabel: Record<string, string> = {
 // Each planning/progress step lowers hunger by 1 in the backend = one bite.
 // We surface that bite as a fruit so the child sees what each step gives.
 
-const PLANNING_BONUS = 2;
-
 const stepEffect: Partial<Record<TaskActionId, { emoji: string; amount: number }>> = {
   set_difficulty: { emoji: '🍊', amount: 1 },
   set_planning: { emoji: '🍓', amount: 1 },
@@ -87,20 +85,12 @@ const stepEffect: Partial<Record<TaskActionId, { emoji: string; amount: number }
   mark_thinks_done: { emoji: '🍒', amount: 1 },
 };
 
-// Compact effect suffix for a button/chip, e.g. " +1🍊" or " +1🍓 🌟+2".
-// The 🌟 bonus appears on the planning step that *completes* full planning,
-// and only on the wider button (chips stay narrow → includeBonus=false).
-function effectSuffix(actionId: TaskActionId, task: TaskSummary, includeBonus = true): string {
+// Compact effect suffix for a button/chip, e.g. " +1🍊". Only the food that
+// actually feeds the bar right now is shown — stars are granted at celebration
+// (collect_reward), so we never advertise them on a planning step.
+function effectSuffix(actionId: TaskActionId): string {
   const eff = stepEffect[actionId];
-  if (!eff) return '';
-  let suffix = ` +${eff.amount}${eff.emoji}`;
-  const completesPlanning =
-    (actionId === 'set_difficulty' && task.planned_window !== 'unknown')
-    || (actionId === 'set_planning' && task.difficulty !== 'unknown');
-  if (includeBonus && completesPlanning && task.status !== 'thinks_done' && task.status !== 'confirmed_done') {
-    suffix += ` 🌟+${PLANNING_BONUS}`;
-  }
-  return suffix;
+  return eff ? ` +${eff.amount}${eff.emoji}` : '';
 }
 
 // ─── Particle configs per action ─────────────────────────────────────────────
@@ -842,12 +832,12 @@ export default function App() {
                       <div className="checklistChips" aria-label="Planeringssteg">
                         <ChecklistChip
                           done={diffDone}
-                          label={diffDone ? difficultyLabel[task.difficulty] : `Svårighet${editable ? effectSuffix('set_difficulty', task, false) : ''}`}
+                          label={diffDone ? difficultyLabel[task.difficulty] : `Svårighet${editable ? effectSuffix('set_difficulty') : ''}`}
                           onClick={editable ? () => setActivePopup({ taskId: task.id, type: 'difficulty' }) : undefined}
                         />
                         <ChecklistChip
                           done={planDone}
-                          label={planDone ? planningLabel[task.planned_window] : `Plan${editable ? effectSuffix('set_planning', task, false) : ''}`}
+                          label={planDone ? planningLabel[task.planned_window] : `Plan${editable ? effectSuffix('set_planning') : ''}`}
                           onClick={editable ? () => setActivePopup({ taskId: task.id, type: 'planning' }) : undefined}
                         />
                         <span className="chip chip--status">{statusLabel[task.status]}</span>
@@ -866,7 +856,7 @@ export default function App() {
                                 disabled={saving}
                                 onClick={(e) => void runAction(task, action, e)}
                               >
-                                {saving ? buttonSavingLabel(action.id) : `${action.label}${effectSuffix(action.id, task)}`}
+                                {saving ? buttonSavingLabel(action.id) : `${action.label}${effectSuffix(action.id)}`}
                               </button>
                             );
                           })}
